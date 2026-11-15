@@ -26,12 +26,37 @@ Một chuỗi bán lẻ trực tuyến có lịch sử đơn hàng (giỏ hàng)
    - Xử lý qua các tầng medallion (bronze → silver → gold).
    - Phục vụ dashboard.
    - Phải tự động, chạy lại an toàn, và tiết kiệm chi phí.
-2. **Khai phá tập mục phổ biến và luật kết hợp** (nửa Data Science), bám bài báo *New Spark solutions for distributed frequent itemset and association rule mining algorithms* (Fernandez-Basso và cộng sự, Cluster Computing, 2024):
+2. **Khai phá tập mục phổ biến và luật kết hợp** (nửa Data Science), bám bài báo nền tảng ở mục 1.3:
    - Cài DApriori, DATID và FP-Growth.
    - So sánh hiệu năng theo quy mô dữ liệu, ngưỡng MinSupport, số item và số core.
    - So **Hadoop MapReduce với Spark** trên cùng một cụm.
 
-### 1.3 Ý nghĩa
+### 1.3 Bài báo nền tảng của phần DS
+
+**Trích dẫn:** C. Fernandez-Basso, M. D. Ruiz, M. J. Martin-Bautista, *New Spark solutions for distributed frequent itemset and association rule mining algorithms*, Cluster Computing 27, 1217–1234 (2024). DOI: [10.1007/s10586-023-04014-w](https://doi.org/10.1007/s10586-023-04014-w) (open access).
+
+**Bài báo nói về gì:**
+- Đề xuất ba thuật toán khai phá tập mục phổ biến **phân tán trên Spark RDD**, cả ba đều exhaustive (trả về mọi tập có support ≥ MinSupp):
+  - **DApriori**: Apriori hai pha. Pha 1 đếm item. Pha 2 lặp theo k, sinh ứng viên bậc k+1 rồi broadcast dạng hash table.
+  - **DATID**: như DApriori, nhưng sau pha 1 xóa item không phổ biến khỏi giao dịch để đếm trên dữ liệu thu gọn.
+  - **DECLAT**: theo ECLAT (dữ liệu dọc).
+- Sinh luật kết hợp phân tán (support, confidence).
+- So sánh với YAFIM và PFP (FP-Growth của Spark MLlib) trên các bộ ít item (Poker, Susy, Higgs, Otto).
+- Đo thời gian theo số giao dịch và số item, bộ nhớ, speedup Sₙ = T₁/Tₙ, efficiency Eₙ = Sₙ/n, số luật.
+- Kết luận: PFP nhanh nhất; DATID tốn ít bộ nhớ nhất và là lựa chọn tốt khi cần đủ mọi luật; thời gian tăng theo hàm mũ khi số item tăng.
+
+**Dự án bám bài báo thế nào:**
+
+| Mức | Nội dung |
+|---|---|
+| Làm đúng như bài | DApriori và DATID viết bằng RDD, đúng cấu trúc hai pha và broadcast; FP-Growth MLlib làm mốc PFP; đo bằng đúng công thức Sₙ, Eₙ; thực nghiệm theo số giao dịch, số item, số core |
+| Điều chỉnh cho Instacart | Instacart có 49.688 sản phẩm (bài chỉ tới 93 item), nên chạy exhaustive ở cấp aisle (134) và department (21), còn cấp product giới hạn k ≤ 3; phần cứng chỉ 4 vCPU nên đường speedup ngắn hơn |
+| Bổ sung so với bài | Lift; kiểm chứng FP-Growth MLlib có exhaustive không; **đo thật MapReduce và Spark trên cùng cụm YARN** (bài chỉ lập luận); đánh giá luật trên holdout để gợi ý; MLflow và API |
+| Không làm | DECLAT, YAFIM: chỉ ghi ở hướng mở rộng |
+
+Bảng đối chiếu đầy đủ (đề tài gốc ↔ bài báo ↔ kế hoạch) là nguồn sự thật cho mọi việc DS, nằm ở [ds/00 §2](ds/00_tong_quan_ds.md). Khi viết code thuật toán hoặc thực nghiệm, đọc mục đó trước.
+
+### 1.4 Ý nghĩa
 
 - **Về kỹ thuật:** dự án đi trọn một vòng dữ liệu, gồm:
   - Ingest: CDC, API, sự kiện.
