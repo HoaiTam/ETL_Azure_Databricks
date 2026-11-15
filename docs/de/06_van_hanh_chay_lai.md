@@ -80,7 +80,7 @@ resources:
 
 `refresh_bi` cần Python để gọi REST nên dùng job cluster. Nó chạy sau cùng, lúc đó cluster pipeline đã tắt.
 
-**Job của DS không nằm trong batch job.** Hình kiến trúc 2 vẽ `train_rules → evaluate_register` sau `build_gold`. Kế hoạch đã tách thành job riêng, chạy tay:
+**Job của DS không nằm trong batch job.** Bản đầu của hình kiến trúc 2 vẽ `train_rules → evaluate_register` sau `build_gold`; kế hoạch (và hình hiện tại) tách thành job riêng, chạy tay:
 - `ds-prepare` (DE sở hữu, [08 §6](08_du_lieu_cho_ds.md)).
 - `ds-benchmark`, `ds-champion` (DS sở hữu, [ds/04 §5](../ds/04_thuc_nghiem_danh_gia.md)).
 

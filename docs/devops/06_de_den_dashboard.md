@@ -59,7 +59,7 @@ Nhóm đã chọn **Lakeflow Declarative Pipelines** (LDP, edition Advanced) cho
 
 `pipeline_batch (LDP instacart_batch) → create_views → collect_dq ∥ reconcile → refresh_bi`
 
-Phần DS **không** gắn vào job này: hình kiến trúc 2 có vẽ `train_rules → evaluate_register`, nhưng kế hoạch đã tách thành các job DS chạy tay ([de/06 §2](../de/06_van_hanh_chay_lai.md), [ds/04 §5](../ds/04_thuc_nghiem_danh_gia.md)).
+Phần DS **không** gắn vào job này mà tách thành các job DS chạy tay (hình kiến trúc 2, dải Lakeflow Jobs) ([de/06 §2](../de/06_van_hanh_chay_lai.md), [ds/04 §5](../ds/04_thuc_nghiem_danh_gia.md)).
 
 | Task | Loại | Ghi chú triển khai |
 |---|---|---|

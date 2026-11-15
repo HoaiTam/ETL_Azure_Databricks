@@ -97,7 +97,7 @@
 | D6 | Chọn cấu hình champion, đóng gói model `pyfunc`, đăng ký UC, phục vụ qua API | DS + P1 | Databricks, Model Serving / Azure Functions | [05](05_mlflow_serving_bao_cao.md) |
 | D7 | Công bố view `gold.*` cho Power BI: luật, gợi ý, kết quả thực nghiệm | DS (view) + P4 (report) | Serverless SQL warehouse | [05 §4](05_mlflow_serving_bao_cao.md), [de/07](../de/07_power_bi.md) |
 
-**Vì sao DS chạy job riêng, không gắn vào batch job hằng ngày** (khác với hình kiến trúc 2, nơi `train_rules` nằm trong batch job):
+**Vì sao DS chạy job riêng, không gắn vào batch job hằng ngày** (hình kiến trúc 2 vẽ riêng dải "Job DS"):
 - `ds_data.baskets` (`v1`) là bản cố định, nên không cần train lại mỗi đêm.
 - Lưới thực nghiệm chạy hàng giờ trên 4 vCPU. Nếu gắn vào batch job, nó sẽ chặn pipeline DE và các buổi demo stream.
 
@@ -123,7 +123,7 @@
 | `ml` | DS | `experiment_runs`, `frequent_itemsets`, `association_rules`, `holdout_metrics`, `recommendations`; model `basket_rules` | Có volume `inbox` để nhận kết quả từ local |
 | `gold` | DE cấp chỗ, DS định nghĩa view | View `association_rules`, `recommendations`, `experiment_metrics` | Power BI chỉ đọc `gold`. View chạy bằng quyền của chủ view, nên vai `bi` không cần quyền vào `ml` |
 
-> Hình kiến trúc ghi `gold.benchmark_results` cho kết quả MapReduce/Spark. Tên này đã được dùng cho benchmark định dạng file (`ops.benchmark_results`, [de/05 §5.1](../de/05_gold_serving.md)). Vì vậy kết quả DS dùng tên **`gold.experiment_metrics`**, có cột `platform` để phân biệt Databricks, Spark on YARN và MapReduce.
+> Bản đầu của hình kiến trúc ghi `gold.benchmark_results` cho kết quả MapReduce/Spark. Tên này đã được dùng cho benchmark định dạng file (`ops.benchmark_results`, [de/05 §5.1](../de/05_gold_serving.md)). Vì vậy kết quả DS dùng tên **`gold.experiment_metrics`**, có cột `platform` để phân biệt Databricks, Spark on YARN và MapReduce.
 
 ### 6.2 Khóa của một lần chạy
 

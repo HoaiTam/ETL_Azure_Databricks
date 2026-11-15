@@ -37,7 +37,7 @@
 | Thuật toán | Pha 1 đếm item → pha 2 đếm cặp của item phổ biến | Giống hệt | Cùng khối lượng tính toán |
 | Ngôn ngữ | Java | Có 2 bản: **DataFrame** (chạy trên JVM, so ngang với Java) và **RDD Python** (bám code DApriori) | Tách riêng chi phí của Python |
 
-> Standalone Spark (như hình kiến trúc) vẫn chạy được trong cùng image, dùng làm mốc phụ. Số liệu chính để so với MapReduce là **Spark on YARN**.
+> Standalone Spark (như bản đầu của hình kiến trúc) vẫn chạy được trong cùng image, dùng làm mốc phụ. Số liệu chính để so với MapReduce là **Spark on YARN**.
 
 ![Cụm Hadoop local: HDFS + YARN, MapReduce và Spark dùng chung](diagrams/03_hadoop_local.png)
 
