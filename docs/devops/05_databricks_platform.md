@@ -70,6 +70,16 @@ resource "databricks_service_principal" "ci" {
   application_id = var.ci_uami_client_id      # client id của id-github-ci
   display_name   = "sp-github-ci"
 }
+
+# G5: danh tính của Azure Function gợi ý (tạo ở 10-core). Chỉ cần quyền gọi endpoint (CAN_QUERY,
+# cấp trong DAB serving_ds.yml); không cấp cluster, không cấp quyền dữ liệu.
+resource "databricks_service_principal" "func" {
+  application_id             = local.core.func_identity_client_id
+  display_name               = "sp-func-recommend"
+  allow_cluster_create       = false
+  databricks_sql_access      = false
+  workspace_access           = false
+}
 ```
 
 **Nhóm:** Unity Catalog chỉ nhận **account group**. Group tạo ở workspace-level (workspace-local) **không** dùng được trong lệnh GRANT. Có ba phương án, chọn theo kết quả spike:
@@ -101,7 +111,7 @@ resource "databricks_storage_credential" "lake" {
 }
 
 resource "databricks_external_location" "layer" {
-  for_each        = toset(["landing", "bronze", "silver", "gold", "checkpoints", "mlflow"])
+  for_each        = toset(["landing", "bronze", "silver", "gold", "checkpoints", "mlflow", "ds"])
   name            = "el-${each.key}"
   url             = "abfss://${each.key}@${local.core.lake_account_name}.dfs.core.windows.net/"
   credential_name = databricks_storage_credential.lake.name
@@ -133,7 +143,8 @@ locals {
     bronze            = "bronze"
     silver            = "silver"
     gold              = "gold"
-    ml                = "mlflow"       # model registry, bảng kết quả train (G5)
+    ml                = "mlflow"       # model registry, bảng kết quả thực nghiệm (docs/ds)
+    ds_data           = "ds"           # dữ liệu thực nghiệm DE chuẩn bị cho DS (de/08)
     instacart_sandbox = "silver"       # dữ liệu tổng hợp để thử tải (is_synthetic)
     ops               = "gold"         # benchmark_results, streaming_latency, dq_results
   }
@@ -159,7 +170,23 @@ resource "databricks_volume" "checkpoints" {        # checkpoint của streaming
   volume_type      = "EXTERNAL"
   storage_location = databricks_external_location.layer["checkpoints"].url
 }
+resource "databricks_volume" "ds_exports" {         # file txt cho Hadoop local (de/08 §5) → blob ds/exports/
+  name             = "exports"
+  catalog_name     = databricks_catalog.instacart.name
+  schema_name      = databricks_schema.s["ds_data"].name
+  volume_type      = "EXTERNAL"
+  storage_location = "${databricks_external_location.layer["ds"].url}exports"
+}
+resource "databricks_volume" "ml_inbox" {           # kết quả benchmark local upload lên (ds/03 §7) → blob ds/inbox/
+  name             = "inbox"
+  catalog_name     = databricks_catalog.instacart.name
+  schema_name      = databricks_schema.s["ml"].name
+  volume_type      = "EXTERNAL"
+  storage_location = "${databricks_external_location.layer["ds"].url}inbox"
+}
 ```
+
+Đường dẫn của hai volume (`ds/exports`, `ds/inbox`) và `storage_root` của schema `ds_data` (`ds/ds_data`) **không chồng nhau**. Unity Catalog từ chối volume ngoài nằm trong vùng lưu trữ của một schema hay bảng.
 
 ### Bước 5 · Phân quyền Unity Catalog (đặc quyền tối thiểu)
 
@@ -172,9 +199,12 @@ resource "databricks_volume" "checkpoints" {        # checkpoint của streaming
 | `silver` | ALL PRIVILEGES | SELECT | — | ALL PRIVILEGES |
 | `gold` | ALL PRIVILEGES | SELECT | **SELECT** | ALL PRIVILEGES |
 | `ml` | SELECT | ALL PRIVILEGES | — | ALL PRIVILEGES |
+| `ds_data` ([de/08](../de/08_du_lieu_cho_ds.md)) | ALL PRIVILEGES | SELECT | — | ALL PRIVILEGES |
 | `ops` | ALL PRIVILEGES | SELECT | SELECT (bảng vận hành) | ALL PRIVILEGES |
 | `instacart_sandbox` | ALL | ALL | — | — |
 | volume `raw`, `checkpoints` | READ/WRITE VOLUME | — | — | READ/WRITE VOLUME |
+| volume `ds_data.exports` | READ/WRITE VOLUME | READ VOLUME | — | READ/WRITE VOLUME |
+| volume `ml.inbox` | — | READ/WRITE VOLUME | — | READ/WRITE VOLUME |
 
 ```hcl
 resource "databricks_grants" "gold" {
@@ -235,6 +265,27 @@ resource "databricks_permissions" "policy_use" {
 Chặn tạo cluster tự do: tắt quyền *Unrestricted cluster creation* của nhóm `users` (`databricks_entitlements`), để mọi người buộc phải dùng policy.
 
 Pipeline Lakeflow (LDP) dùng cluster riêng nên cần thêm policy loại `dlt` (`instacart-pipeline-single-node`, `num_workers = 0`), code ở [de/02 §2.1](../de/02_bronze_ldp.md).
+
+**Policy cho thực nghiệm DS** (`instacart-ds-benchmark`): cùng máy, cùng runtime với `instacart-single-node`, chỉ khác là cho chọn `spark.master` trong `local[1]` / `local[2]` / `local[4]`. Đo speedup theo số core (E5, [ds/04](../ds/04_thuc_nghiem_danh_gia.md)) cần điều này, mà policy chung lại khóa cứng `local[*]`.
+
+```hcl
+resource "databricks_cluster_policy" "ds_benchmark" {
+  name = "instacart-ds-benchmark"
+  definition = jsonencode({
+    "spark_version"           = { type = "fixed", value = "15.4.x-scala2.12" }
+    "node_type_id"            = { type = "fixed", value = "Standard_DS3_v2" }   # cố định máy để số đo so được
+    "num_workers"             = { type = "fixed", value = 0 }
+    "spark_conf.spark.databricks.cluster.profile" = { type = "fixed", value = "singleNode" }
+    "spark_conf.spark.master" = { type = "allowlist", values = ["local[1]", "local[2]", "local[4]", "local[*]"],
+                                  defaultValue = "local[*]" }
+    "custom_tags.ResourceClass" = { type = "fixed", value = "SingleNode" }
+    "autotermination_minutes" = { type = "range", maxValue = 20, defaultValue = 15 }
+    "custom_tags.owner"       = { type = "unlimited", isOptional = false }
+    "data_security_mode"      = { type = "fixed", value = "SINGLE_USER" }
+  })
+}
+# databricks_permissions: CAN_USE cho var.roles.ds và SP CI (giống policy_use ở trên)
+```
 
 > Instance pool chỉ có lợi khi chạy nhiều job ngắn liên tiếp. Với quota 4 vCPU, VM idle trong pool vẫn **chiếm quota**. Mặc định **không** dùng pool.
 
@@ -327,6 +378,24 @@ targets:
 
 Pipeline LDP (`resources.pipelines`) khai báo ở [de/02 §2.2](../de/02_bronze_ldp.md) và [de/04 §3.1](../de/04_streaming.md); job đầy đủ ở [de/06 §2](../de/06_van_hanh_chay_lai.md). Khung dưới đây chỉ minh họa cách dùng `policy_id`.
 
+**Phần DS trong cùng bundle** (G3 → G5):
+
+| File | Tài nguyên DAB | Chi tiết |
+|---|---|---|
+| `resources/jobs_ds.yml` | Job `ds_prepare` (DE), `ds_benchmark`, `ds_champion` (DS) | [de/08 §6](../de/08_du_lieu_cho_ds.md), [ds/04 §5](../ds/04_thuc_nghiem_danh_gia.md) |
+| `resources/mlflow_ds.yml` | `experiments.instacart_ds` (`/Shared/instacart-ds`) | [ds/05 §1](../ds/05_mlflow_serving_bao_cao.md) |
+| `resources/serving_ds.yml` | `model_serving_endpoints.basket_rules`, biến `champion_version` | [ds/05 §3.1](../ds/05_mlflow_serving_bao_cao.md) |
+
+Thêm biến vào `databricks.yml`:
+
+```yaml
+variables:
+  ds_policy_id: { lookup: { cluster_policy: instacart-ds-benchmark } }
+  func_sp_application_id: { description: "client id của id-func-recommend (output 10-core), truyền qua --var" }
+```
+
+Target `sandbox` (host của workspace Sub C) **chỉ thêm khi Sub C cùng region với Sub A**, vì khi đó hai workspace dùng chung metastore ([03 §5](03_terraform_azure.md)). Target này chỉ deploy job DS.
+
 ```yaml
 # bundles/resources/jobs_batch.yml (khung; nội dung task ở tài liệu 06)
 resources:
@@ -335,17 +404,23 @@ resources:
       name: instacart-batch-medallion
       job_clusters:
         - job_cluster_key: sn
-          new_cluster: { policy_id: ${var.policy_id}, apply_policy_default_values: true, custom_tags: { owner: p2 } }
+          new_cluster:
+            policy_id: ${var.policy_id}
+            apply_policy_default_values: true
+            custom_tags: { owner: p2 }
       tasks:
-        - { task_key: ingest_bronze, job_cluster_key: sn, spark_python_task: { python_file: ../src/batch/ingest_bronze.py, parameters: ["--catalog", "${var.catalog}"] } }
-        - { task_key: build_silver,  depends_on: [{ task_key: ingest_bronze }], ... }
-        - { task_key: build_gold,    depends_on: [{ task_key: build_silver }],  ... }
+        - task_key: ingest_bronze
+          job_cluster_key: sn
+          spark_python_task:
+            python_file: ../src/batch/ingest_bronze.py
+            parameters: ["--catalog", "${var.catalog}"]
+        # build_silver (depends_on ingest_bronze), build_gold (depends_on build_silver): cùng mẫu
 ```
 
 ## 5. Checklist (cổng G1)
 
 - [ ] `terraform plan` của `30-databricks` báo *No changes* sau khi apply.
-- [ ] `SHOW SCHEMAS IN instacart` liệt kê đủ 7 schema; `DESCRIBE EXTERNAL LOCATION el-bronze` trả về đúng URL.
+- [ ] `SHOW SCHEMAS IN instacart` liệt kê đủ 8 schema (thêm `ds_data`); `DESCRIBE EXTERNAL LOCATION el-bronze` trả về đúng URL.
 - [ ] P2 (vai `de`) tạo được bảng trong `bronze`. P4 (vai `bi`) **không** đọc được `bronze` (lỗi PERMISSION_DENIED) nhưng đọc được `gold`.
 - [ ] Không chọn được cấu hình cluster nào ngoài policy single-node; cluster tự tắt sau 20 phút.
 - [ ] `dbutils.secrets.get("kv","sql-admin-password")` trả về `[REDACTED]` trong notebook.

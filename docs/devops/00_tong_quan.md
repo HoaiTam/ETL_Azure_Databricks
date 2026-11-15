@@ -30,7 +30,7 @@ Nhóm tập trung vào **mục 4 (phân tích dữ liệu + trực quan dữ li�
 | 4 · Trực quan: cập nhật tức thời | Streaming job → gold; Power BI DirectQuery + push semantic model cho tile real-time | 06 |
 | 4 · Trực quan: bảo mật, chia sẻ, RLS | Vai trò RLS trong semantic model; nhóm Entra ID; quyền đọc gold trong Unity Catalog | 05, 06 |
 | 4 · Trực quan: responsive mobile | Bố cục mobile cho từng trang báo cáo Power BI | 06 |
-| 4 · Phân tích: train, API model, trực quan tham số | MLflow, UC model registry, model serving (cổng G5, viết ở tài liệu DS sau) | (sau) |
+| 4 · Phân tích: train, API model, trực quan tham số | Schema `ds_data`/`ml`, policy cho chọn số core, MLflow, UC model registry, model serving, Azure Function (cổng G5) | 03, 05, [ds/](../ds/00_tong_quan_ds.md) |
 | 5.4 Quản lý dự án trên cloud: nhiều người cùng làm trên một resource, GitHub, chi phí và quota | RBAC cho 4 người, tag `owner`, budget alert, Infracost trên PR, GitHub Projects/PR review, bảng quota | 02, 03, 04 |
 
 ## 2. Nguyên tắc thiết kế
@@ -66,11 +66,11 @@ Nhóm tập trung vào **mục 4 (phân tích dữ liệu + trực quan dữ li�
 | P5 · Stack stream (Sub B) | Event Hubs, SAS vào Key Vault, workflow bật/tắt | 03, 04 | **G2: streaming sẵn sàng** | Simulator → Event Hubs → `bronze.order_events` |
 | P6 · Pipeline DE | ADF pipeline (stack orchestration), DAB jobs batch + streaming, kiểm tra DQ | 06 | **G3: silver đạt đối soát** | **DS bắt đầu** trên `silver.baskets`; BI nối thử gold dev |
 | P7 · Gold + Power BI | Gold, lớp serving, semantic model, 4 report, RLS, mobile, cập nhật real-time | 06 | **G4: dashboard đạt rubric** | Demo phần trực quan |
-| P8 · Hạ tầng DS (sau) | MLflow experiment, UC model registry, model serving, (Azure Function làm API proxy) | (tài liệu DS) | **G5** | Train, API model, trực quan tham số |
+| P8 · Hạ tầng DS | Container `ds`, schema `ds_data`, policy `instacart-ds-benchmark`, MLflow, serving endpoint, stack `50-serving` (Function), cụm Hadoop Docker ở máy local | 03, 05, [ds/](../ds/00_tong_quan_ds.md) | **G5** | Thực nghiệm DApriori / DATID / FP-Growth, MapReduce và Spark, API model, trang 6–7 |
 
 **Hai điểm then chốt người dùng hỏi:**
 - **DE bắt đầu trên cloud ở G1.** Lúc này đã có ADLS, External Location và catalog `instacart`. Trước G1, DE vẫn viết và test code bằng PySpark local, vì code chạy được trên cả hai môi trường.
-- **DS bắt đầu ở G3.** Lúc này `silver.baskets` (prior | holdout) đã qua đối soát số dòng. DS train thử FP-Growth trên workspace #2 (Sub C), không tranh quota với DE ở Sub A.
+- **DS bắt đầu ở G3.** Lúc này `silver.baskets` (prior | holdout) đã qua đối soát số dòng, và DE chạy job `ds-prepare` để chụp thành bản cố định `ds_data.*` ([de/08](../de/08_du_lieu_cho_ds.md)). DS chạy thực nghiệm trên workspace #2 (Sub C) nếu cùng region với Sub A, nếu không thì trên Sub A ngoài giờ batch. Phần Hadoop MapReduce chạy ở máy local bằng Docker ([ds/03](../ds/03_hadoop_mapreduce_local.md)).
 
 ## 4. Phân vai 4 người
 
@@ -79,7 +79,7 @@ Nhóm tập trung vào **mục 4 (phân tích dữ liệu + trực quan dữ li�
 | **P1 · Platform / DevOps** | Sub A (core) | Tài liệu 01–05, stack `bootstrap`, `10-core`, `30-databricks`, workflow CI/CD, chi phí | `infra/**`, `.github/**` |
 | **P2 · DE batch** | — (dùng Sub A) | ADF pipeline, Auto Loader, bronze → silver → gold batch, DQ | `adf/**`, `src/batch/**` |
 | **P3 · DE streaming** | Sub B (stream) | Stack `20-stream`, simulator, streaming jobs, đo độ trễ khác region | `src/streaming/**`, `infra/stacks/20-stream/**` |
-| **P4 · BI / DS** | Sub C (sandbox), Sub D dự phòng | Power BI (4 report, RLS, mobile), lớp serving; sau G3 làm FP-Growth / DApriori | `powerbi/**`, `src/ml/**` |
+| **P4 · BI / DS** | Sub C (sandbox), Sub D dự phòng | Power BI (4 report, RLS, mobile), lớp serving; sau G3 làm DApriori / DATID / FP-Growth, thực nghiệm, MapReduce (cùng P3) | `powerbi/**`, `src/ml/**`, `src/mapreduce/**`, `local/hadoop/**` |
 
 Mỗi PR cần ít nhất 1 người khác duyệt. PR đụng `infra/**` bắt buộc có P1 duyệt (CODEOWNERS). Lịch sử PR, review, issue và board trên GitHub Projects là bằng chứng cho rubric 5.4.
 
@@ -92,6 +92,7 @@ Mỗi PR cần ít nhất 1 người khác duyệt. PR đụng `infra/**` bắt 
 | Databricks serverless SQL warehouse / model serving | Phục vụ truy vấn BI, API model | **PaaS** (serverless, không tính quota) |
 | ADLS Gen2, Azure SQL Database, Event Hubs, Data Factory, Key Vault | Lưu trữ, nguồn SQL, hàng đợi sự kiện, điều phối, bí mật | **PaaS** |
 | Azure Functions (tùy chọn ở G5) | Proxy HTTP gọi model serving cho web | **FaaS** |
+| Cụm Hadoop HDFS + YARN, Spark on YARN (Docker trên máy thành viên) | So sánh MapReduce và Spark | **Không thuộc cloud.** Ghi rõ trong báo cáo là môi trường thực nghiệm local |
 | Power BI Service, GitHub, Entra ID | Dashboard, mã nguồn và CI, danh tính | **SaaS** |
 
 ## 6. Timeline (tuần tương đối, căn theo hạn nộp thật)
@@ -101,8 +102,8 @@ Mỗi PR cần ít nhất 1 người khác duyệt. PR đụng `infra/**` bắt 
 | 1 | Spike, bootstrap, stack core | Code ingest + silver local | Simulator local (Kafka trong Docker) | Kiểm tra giấy phép Power BI, phác thảo 4 report | G0 |
 | 2 | CI/CD, stack Databricks | ADF Zenodo + SQL → landing → bronze | Stack stream, Kafka → bronze | Mockup report trên dữ liệu mẫu | G1, G2 |
 | 3 | Stack orchestration, Infracost | Silver + DQ + đối soát | stream → silver, MERGE | Semantic model dev | G3 |
-| 4 | Hỗ trợ, tối ưu chi phí | Gold batch, benchmark đọc ghi | pair counts, đo độ trễ | Publish Power BI, RLS, mobile, real-time | G4 |
-| 5–6 | Hạ tầng DS (G5) | Tối ưu (OPTIMIZE, clustering) | Ổn định demo | FP-Growth / DApriori | G5 |
+| 4 | Hỗ trợ, tối ưu chi phí | Gold batch, benchmark đọc ghi; `ds-prepare` ngay sau G3 | pair counts, đo độ trễ; cùng P4 dựng cụm Hadoop Docker | Publish Power BI, RLS, mobile, real-time; EDA + spike hiệu năng DS (DS-1) | G4 |
+| 5–6 | Hạ tầng DS (G5): serving, `50-serving` | Tối ưu (OPTIMIZE, clustering) | MapReduce Java, E6 | Lưới E1–E5, E7, champion, trang 6–7 | G5 |
 | 7 | Báo cáo chi phí, quota | Báo cáo | Báo cáo | Báo cáo + demo | — |
 
 ## 7. Rủi ro lớn nhất (chi tiết ở tài liệu 01)
@@ -114,3 +115,5 @@ Mỗi PR cần ít nhất 1 người khác duyệt. PR đụng `infra/**` bắt 
 | Không có quyền admin Unity Catalog (metastore) | Không tạo được storage credential / external location | Dùng managed storage của catalog mặc định |
 | Power BI Pro: auto page refresh tối thiểu 30 phút | "Real-time" không đạt nếu chỉ dựa vào DirectQuery | Thêm **push semantic model** (tile cập nhật trong vài giây) cho KPI streaming |
 | Hết credit $100 | Mất tài nguyên giữa chừng | Budget alert, hủy stream mỗi đêm; hạ tầng dựng lại được bằng code ở Sub C/D |
+| Lưới thực nghiệm DS chạy quá lâu trên 4 vCPU (PySpark RDD chậm) | Không kịp đủ số liệu cho báo cáo | Spike DS-1 đo trước rồi mới chốt lưới; timeout 30 phút / lần chạy, ghi `timeout` thay vì bỏ ([ds/04 §2](../ds/04_thuc_nghiem_danh_gia.md)) |
+| Model Serving / Function không tạo được trên Students | Thiếu "API model" | Phương án B: Function tự tra luật từ file Parquet của champion ([ds/05 §3.3](../ds/05_mlflow_serving_bao_cao.md)) |

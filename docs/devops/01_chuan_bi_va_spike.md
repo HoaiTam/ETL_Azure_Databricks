@@ -20,7 +20,8 @@
 | GitHub CLI | mới nhất | PR, secret, environment | `brew install gh` |
 | pre-commit | mới nhất | Chạy fmt/lint trước khi commit | `brew install pre-commit` |
 | Python 3.11 + uv | 3.11 (khớp Databricks Runtime) | Code PySpark, test | `brew install uv && uv python install 3.11` |
-| Docker Desktop | mới nhất | Spark/Kafka local, benchmark MapReduce | — |
+| Docker Desktop | mới nhất; máy chạy benchmark DS cấp cho Docker ≥ 8 CPU, ≥ 16 GB RAM | Spark/Kafka local; cụm Hadoop HDFS + YARN cho MapReduce ([ds/03](../ds/03_hadoop_mapreduce_local.md)) | — |
+| AzCopy | 10.x | Tải file thực nghiệm từ container `ds`, upload kết quả benchmark (đăng nhập bằng `az login`) | `brew install azcopy` |
 | Power BI Desktop | mới nhất | Làm report (chỉ chạy Windows: máy Windows của P4 hoặc VM) | Microsoft Store |
 | Infracost | mới nhất | Ước tính chi phí trên PR (tùy chọn) | `brew install infracost` |
 
@@ -95,6 +96,9 @@ Tạo tay **một** workspace Premium ở region đã chốt (Portal, mất kho�
 | Serverless pipeline | Tạo pipeline với *Serverless* | Chạy được | Classic như trên; MV tính lại toàn bộ thay vì tăng dần |
 | Kafka (Event Hubs) trong LDP + đổi tên flow | `append_flow` đọc Kafka, sau đó đổi tên flow và chạy lại | Bảng giữ dữ liệu, flow mới đọc từ đầu | Giữ namespace cố định suốt giai đoạn demo ([de/04 §3.2](../de/04_streaming.md)) |
 | ForEachBatch sink của LDP | Sink POST tới một URL thử | Chạy được | Power BI DirectQuery + auto page refresh ([de/04 §4.5](../de/04_streaming.md)) |
+| Cluster đặt `spark.master = local[1]` / `local[2]` qua policy DS | Tạo job cluster với policy thử có `allowlist` cho `spark.master`; chạy `sc.defaultParallelism` | Trả về đúng 1 / 2 | Đo speedup chỉ ở local Docker (E6); E5 chỉ còn n = 4 ([ds/04](../ds/04_thuc_nghiem_danh_gia.md)) |
+| Job `for_each_task` đọc task value | Job 2 task: task 1 đặt task value là list, task 2 lặp `concurrency: 1` | Lặp đủ phần tử | Task `plan` sinh nhiều job run bằng SDK, mỗi tổ hợp một run |
+| **Model Serving** (serverless) | Đăng ký một model `pyfunc` nhỏ vào UC, tạo endpoint `scale_to_zero`, gọi `invocations` | Trả kết quả | Phương án B: Azure Function tự tra luật ([ds/05 §3.3](../ds/05_mlflow_serving_bao_cao.md)) |
 
 ### 3.5 Dịch vụ còn lại
 
@@ -105,6 +109,7 @@ Tạo tay **một** workspace Premium ở region đã chốt (Portal, mất kho�
 | Event Hubs Standard + Kafka endpoint | Tạo namespace Standard, dùng `kcat` gửi 1 message vào `:9093` | Basic không có Kafka → bắt buộc dùng Standard |
 | ADF có activity "Databricks Job" | ADF Studio → Activities → Databricks | Dùng activity Notebook để gọi notebook điều phối job |
 | ADF tải ZIP từ Zenodo qua HTTP | Copy activity: HTTP → ADLS, kiểm tra xem có dùng ZipDeflate được không | Tải về rồi giải nén trong Databricks (`unzip` trên driver) |
+| Azure Functions **Flex Consumption** (G5) | Portal → Function App → Flex Consumption, Python 3.11, ở region Sub A | Gói Consumption cũ (`Y1`); không được nữa thì bỏ Function, gọi endpoint trực tiếp khi demo |
 
 ### 3.6 Power BI (P4)
 
@@ -128,5 +133,7 @@ Tạo tay **một** workspace Premium ở region đã chốt (Portal, mất kho�
 | Compute | Single-node DS3_v2 (mặc định) / máy khác cùng 4 vCPU | 3.2, 3.4 |
 | Pipeline DE | LDP Advanced classic single-node (mặc định) / LDP serverless / LDP Pro | 3.4 |
 | Nguồn SQL | CDC theo LSN (mặc định) / watermark `updated_at` + soft delete | 3.5 |
+| Nơi chạy job DS | Sub C sandbox nếu cùng region với Sub A (mặc định) / Sub A ngoài giờ batch | 3.1, 3.4 |
+| API model (G5) | Model Serving + Function (mặc định) / Function tự tra luật | 3.4, 3.5 |
 
 Sau khi chốt: **xóa resource group spike** bằng lệnh `az group delete -n rg-spike` và xóa workspace thử, để Terraform dựng lại từ đầu.

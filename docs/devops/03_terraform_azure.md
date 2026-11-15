@@ -1,7 +1,7 @@
 # 03 · Dựng hạ tầng Azure bằng Terraform (giai đoạn P2 và P5)
 
 **Đầu vào:** bootstrap đã xong ([02](02_bootstrap_tfstate.md)); kết quả spike ([01](01_chuan_bi_va_spike.md)).
-**Đầu ra:** stack `10-core` (Sub A), `20-stream` (Sub B), `90-sandbox` (Sub C/D) đã apply. Các output (URL workspace, tên storage, ID Key Vault) được những stack sau đọc.
+**Đầu ra:** stack `10-core` (Sub A), `20-stream` (Sub B), `90-sandbox` (Sub C/D) đã apply; `50-serving` (Sub A, tùy chọn ở G5). Các output (URL workspace, tên storage, ID Key Vault) được những stack sau đọc.
 **Xong khi:** đạt checklist ở cuối mỗi stack. Từ thời điểm đó mọi thay đổi chỉ đi qua PR ([04](04_github_actions_cicd.md)).
 
 > Ở giai đoạn đầu, P1 chạy `plan/apply` của `10-core` từ máy local để gỡ lỗi nhanh. Khi CI xong (P3 của tài liệu 00), apply chuyển hẳn sang GitHub Actions.
@@ -26,9 +26,10 @@ infra/
     20-stream/          # Sub B — Event Hubs (bật/tắt theo buổi)
     30-databricks/      # bên trong workspace (tài liệu 05)
     40-orchestration/   # ADF linked service, dataset, pipeline, trigger (tài liệu 06)
+    50-serving/         # Sub A — Azure Function làm API gợi ý (tùy chọn, G5, docs/ds/05)
     90-sandbox/         # Sub C/D — workspace #2 cho DS
   envs/
-    10-core.tfvars  20-stream.tfvars  30-databricks.tfvars  40-orchestration.tfvars  90-sandbox-p4.tfvars
+    10-core.tfvars  20-stream.tfvars  30-databricks.tfvars  40-orchestration.tfvars  50-serving.tfvars  90-sandbox-p4.tfvars
 ```
 
 **Vì sao tách stack (mỗi stack một state):**
@@ -149,7 +150,7 @@ module "lake" {
   account_replication_type  = "LRS"
   is_hns_enabled            = true
   shared_access_key_enabled = false          # chỉ dùng Entra ID / managed identity
-  containers = { for c in ["landing","bronze","silver","gold","checkpoints","mlflow"] :
+  containers = { for c in ["landing","bronze","silver","gold","checkpoints","mlflow","ds"] :
                  c => { name = c } }
   enable_telemetry = false
   tags             = module.nt.tags
@@ -173,7 +174,14 @@ resource "azurerm_storage_management_policy" "lake" {      # rubric 3.4: tối �
 }
 ```
 
-**Kiểm tra:** `az storage fs list --account-name <st> --auth-mode login` thấy đủ 6 container.
+**Kiểm tra:** `az storage fs list --account-name <st> --auth-mode login` thấy đủ 7 container.
+
+Container `ds` dành cho phần Data Science ([docs/ds](../ds/00_tong_quan_ds.md)):
+- `ds/exports/`: DE xuất file txt cho cụm Hadoop local.
+- `ds/inbox/`: kết quả benchmark từ máy local upload lên.
+- `ds/serving/`: luật của model champion, dùng cho phương án B của API.
+
+Các thành viên tải/upload bằng AzCopy với quyền *Storage Blob Data Contributor* đã cấp ở bước 3.8, không cần SAS hay key.
 
 ### Bước 3.3 · Key Vault
 
@@ -212,6 +220,16 @@ resource "azurerm_role_assignment" "uc_lake" {
   scope                = module.lake.resource_id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_databricks_access_connector.uc.identity[0].principal_id
+}
+
+# Danh tính cho Azure Function gợi ý (G5). Tạo sẵn ở đây (không tốn tiền) để stack 30-databricks
+# thêm nó vào workspace trước khi stack 50-serving tồn tại. User-assigned nên có client_id ngay,
+# không cần quyền đọc Microsoft Graph để tra application ID.
+resource "azurerm_user_assigned_identity" "func" {
+  name                = "id-func-recommend"
+  resource_group_name = azurerm_resource_group.core.name
+  location            = var.location
+  tags                = module.nt.tags
 }
 ```
 
@@ -397,11 +415,13 @@ output "databricks_workspace_url" { value = module.dbw.workspace_url }
 output "databricks_workspace_id"  { value = module.dbw.resource_id }
 output "adf_id"                   { value = module.adf.resource_id }
 output "sql_server_fqdn"          { value = module.sql.resource.fully_qualified_domain_name }
+output "func_identity_id"         { value = azurerm_user_assigned_identity.func.id }
+output "func_identity_client_id"  { value = azurerm_user_assigned_identity.func.client_id }
 ```
 
 **Checklist `10-core`:**
 - [ ] `terraform plan` lần hai báo *No changes*. Nếu vẫn còn thay đổi thì cấu hình không ổn định.
-- [ ] 6 container có trong ADLS; shared key bị tắt.
+- [ ] 7 container có trong ADLS; shared key bị tắt.
 - [ ] Mở được workspace; P2–P4 đăng nhập được workspace bằng tài khoản trường.
 - [ ] `sqlcmd` (hoặc Azure Data Studio) kết nối `retail_db` từ IP thành viên được.
 - [ ] Email test của action group đến được cả 4 người.
@@ -500,6 +520,69 @@ Workspace sandbox **gắn vào cùng metastore** Unity Catalog. Metastore tính 
 
 Stack này **chỉ cần dựng ở G3**, khi DS bắt đầu.
 
+**DS chạy ở đâu** ([ds/04 §5.2](../ds/04_thuc_nghiem_danh_gia.md)):
+- **Sub C cùng region với Sub A:** job `ds-benchmark` deploy với target `sandbox` lên workspace này, đọc `ds_data` qua metastore chung, chạy song song với DE.
+- **Khác region:** không dựng Delta Sharing hay sao chép bảng (thêm việc mà không thêm điểm). Job DS chạy ở Sub A ngoài giờ batch, và `90-sandbox` chỉ dùng làm workspace thử nghiệm.
+- Cụm **Hadoop/MapReduce chạy bằng Docker ở máy local**, không cần tài nguyên Azure nào ([ds/03](../ds/03_hadoop_mapreduce_local.md)). Đây là quyết định có chủ đích: HDInsight vượt quota 4 vCPU, còn Sub D để dành cho trường hợp dựng lại hạ tầng.
+
+### 5.1 Stack `50-serving` (Sub A, tùy chọn ở G5): Azure Function làm API gợi ý
+
+**Vì sao:** trang web hoặc demo gọi một HTTP endpoint đơn giản, không giữ token Databricks. Function dùng danh tính `id-func-recommend` (tạo ở bước 3.4) để lấy token Entra rồi gọi Model Serving. Đây cũng là thành phần **FaaS** của rubric 1.4. Code của Function ở [ds/05 §3.2](../ds/05_mlflow_serving_bao_cao.md).
+
+| Tài nguyên | Ghi chú |
+|---|---|
+| Storage account nhỏ cho Function | Chỉ chứa gói code; truy cập bằng danh tính, tắt shared key |
+| Function App **Flex Consumption** (Linux, Python 3.11) | Trả theo lần gọi, về 0 khi rảnh. Gói *Linux Consumption* cũ đã được Microsoft thông báo ngừng, nên không chọn |
+| Gán `id-func-recommend` cho Function | App setting `AZURE_CLIENT_ID` = client ID của danh tính |
+| Role *Storage Blob Data Reader* trên **container** `ds` (không phải cả account) | Chỉ cần cho phương án B: Function tự đọc luật từ `ds/serving/` |
+
+```hcl
+# infra/stacks/50-serving/main.tf  (minh họa; kiểm tên tham số theo đúng version provider azurerm đã pin)
+resource "azurerm_service_plan" "func" {
+  name                = "asp-instacart-func"
+  resource_group_name = local.core.rg_name
+  location            = local.core.location
+  os_type             = "Linux"
+  sku_name            = "FC1"                         # Flex Consumption
+}
+
+resource "azurerm_function_app_flex_consumption" "recommend" {
+  name                        = "func-instacart-recommend"
+  resource_group_name         = local.core.rg_name
+  location                    = local.core.location
+  service_plan_id             = azurerm_service_plan.func.id
+  storage_container_type      = "blobContainer"
+  storage_container_endpoint  = "${azurerm_storage_account.func.primary_blob_endpoint}${azurerm_storage_container.pkg.name}"
+  storage_authentication_type = "UserAssignedIdentity"
+  storage_user_assigned_identity_id = local.core.func_identity_id
+  runtime_name                = "python"
+  runtime_version             = "3.11"
+  maximum_instance_count      = 40
+  instance_memory_in_mb       = 2048
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [local.core.func_identity_id]
+  }
+  app_settings = {
+    AZURE_CLIENT_ID = local.core.func_identity_client_id
+    DATABRICKS_HOST = local.core.databricks_workspace_url
+    ENDPOINT_NAME   = "instacart-basket-rules"
+  }
+  site_config {}
+  tags = module.nt.tags
+}
+
+resource "azurerm_role_assignment" "func_ds_reader" {          # phương án B
+  scope                = "${local.core.lake_account_id}/blobServices/default/containers/ds"
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = local.core.func_identity_principal_id
+}
+```
+
+- `local.core` đọc từ `terraform_remote_state` của `10-core`. Cần thêm output `lake_account_id` và `func_identity_principal_id` vào `10-core` khi làm stack này.
+- **Spike:** Flex Consumption có ở region đã chốt và subscription Students có cho tạo hay không ([01 §3.5](01_chuan_bi_va_spike.md)). Không được thì dùng gói Consumption cũ (`sku_name = "Y1"`, resource `azurerm_linux_function_app`), và ghi lý do vào báo cáo.
+- Code Function deploy bằng workflow `func-deploy` ([04 §3.8](04_github_actions_cicd.md)), không đi qua Terraform.
+
 ---
 
 ## 6. Thứ tự apply và phụ thuộc
@@ -512,5 +595,6 @@ Stack này **chỉ cần dựng ở G3**, khi DS bắt đầu.
 | 3 | 20-stream | 10-core (Key Vault) | P3 hoặc CI `stream-toggle` |
 | 4 | 40-orchestration | 10-core, 30-databricks (job ID) | CI |
 | 5 | 90-sandbox | bootstrap (+ metastore) | P4 local |
+| 6 | 50-serving (tùy chọn) | 10-core, 30-databricks (endpoint đã có) | CI |
 
 `terraform destroy` đi theo **thứ tự ngược lại**. Lưu ý: muốn destroy `10-core` thì phải destroy `30` và `40` trước. Nếu không, provider databricks sẽ báo lỗi vì không còn workspace.

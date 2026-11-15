@@ -32,10 +32,14 @@ Ngày làm spike: `<yyyy-mm-dd>` · Người tổng hợp: P1
 | 3.4 | Serverless jobs / notebook | A | | |
 | 3.4 | Cluster single-node DS3_v2, DBR 15.4 LTS | A | | |
 | 3.4 | Ngày hết trial Premium | A | | |
+| 3.4 | Policy DS: `spark.master` = `local[1]` / `local[2]` | A | | |
+| 3.4 | Job `for_each_task` + task value | A | | |
+| 3.4 | Model Serving (serverless) | A | | |
 | 3.5 | Azure SQL free offer | A | | |
 | 3.5 | Event Hubs Standard + Kafka `:9093` | B | | |
 | 3.5 | ADF activity "Databricks Job" | A | | |
 | 3.5 | ADF tải ZIP Zenodo (ZipDeflate) | A | | |
+| 3.5 | Azure Functions Flex Consumption | A | | |
 | 3.6 | Giấy phép Power BI Pro / trial | — | | |
 | 3.6 | Workspace `instacart-bi` + chia sẻ | — | | |
 | 3.6 | Connector Azure Databricks trong Desktop | — | | |
@@ -54,5 +58,7 @@ Ngày làm spike: `<yyyy-mm-dd>` · Người tổng hợp: P1
 | Unity Catalog | External location / managed storage | 3.4 |
 | Lớp serving Power BI | Serverless warehouse / Azure SQL / `DeltaLake.Table` | 3.4, 3.6 |
 | Compute | Single-node DS3_v2 / máy khác 4 vCPU | 3.2, 3.4 |
+| Nơi chạy job DS | Sub C (cùng region) / Sub A ngoài giờ batch | 3.1, 3.4 |
+| API model | Model Serving + Function / Function tự tra luật | 3.4, 3.5 |
 
 - [ ] Đã xóa `rg-spike` và workspace thử.
