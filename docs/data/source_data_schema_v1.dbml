@@ -1,0 +1,240 @@
+// Instacart ETL on Azure Databricks - source and enrichment schema
+// Paste into https://dbdiagram.io  |  Docs: https://dbml.dbdiagram.io/docs
+// Groups: Instacart (goc), Azure SQL (tu sinh), Open Food Facts (API), Streaming, Silver (dan xuat)
+
+// ============ 1. INSTACART - du lieu goc (CSV, Zenodo) ============
+
+Table orders {
+  order_id integer [primary key]
+  user_id integer [not null, note: 'Ma khach, da an danh']
+  eval_set varchar [not null, note: 'prior | train | test - Instacart tu chia']
+  order_number integer [not null, note: 'Don thu may cua khach']
+  order_dow integer [not null, note: 'Thu trong tuan 0-6, khong cong bo 0 la thu may']
+  order_hour_of_day integer [not null, note: 'Gio dat don 0-23']
+  days_since_prior_order float [null, note: 'So ngay tu don truoc, chan 30, null o don dau']
+  Note: '3.421.083 dong. Header don hang. Khong co cot ngay thang.'
+}
+
+Table order_products__prior {
+  order_id integer [not null]
+  product_id integer [not null]
+  add_to_cart_order integer [not null, note: 'Thu tu bo vao gio']
+  reordered integer [not null, note: '1 neu khach tung mua san pham nay']
+  indexes {
+    (order_id, product_id) [pk]
+  }
+  Note: '32.434.489 dong. Mon cua don prior -> batch, train luat ket hop.'
+}
+
+Table order_products__train {
+  order_id integer [not null]
+  product_id integer [not null]
+  add_to_cart_order integer [not null]
+  reordered integer [not null]
+  indexes {
+    (order_id, product_id) [pk]
+  }
+  Note: '1.384.617 dong. Mon cua don train -> replay streaming, lam holdout.'
+}
+
+Table products {
+  product_id integer [primary key]
+  product_name varchar [not null, note: 'Khoa de ghep voi Open Food Facts (theo ten)']
+  aisle_id integer [not null]
+  department_id integer [not null]
+  Note: '49.688 dong. Bang duoc lam giau.'
+}
+
+Table aisles {
+  aisle_id integer [primary key]
+  aisle varchar [not null]
+  Note: '134 dong'
+}
+
+Table departments {
+  department_id integer [primary key]
+  department varchar [not null]
+  Note: '21 dong'
+}
+
+// ============ 2. AZURE SQL - du lieu tu sinh ============
+
+Table product_prices {
+  price_id integer [primary key]
+  product_id integer [not null]
+  unit_price decimal(10,2) [not null, note: 'USD, gia lap']
+  currency char(3) [default: 'USD']
+  valid_from date [not null]
+  valid_to date [not null, note: '9999-12-31 = gia hien hanh']
+  updated_at datetime [not null, note: 'Watermark cho ADF copy tang dan']
+  Note: 'Lich su gia (SCD2). Du lieu tu sinh bang Python, co seed.'
+}
+
+Table promotions {
+  promo_id varchar [primary key]
+  product_id integer [not null]
+  promo_type varchar [not null, note: 'percent_off | bogo']
+  discount_pct integer
+  start_date date [not null]
+  end_date date [not null]
+  updated_at datetime [not null, note: 'Watermark cho ADF']
+  Note: 'Chuong trinh khuyen mai. Du lieu tu sinh.'
+}
+
+// ============ 3. OPEN FOOD FACTS - REST API (JSON + anh) ============
+
+Table off_products {
+  code varchar [primary key, note: 'Ma vach EAN/UPC']
+  product_name varchar
+  brands varchar
+  categories_tags "array<varchar>"
+  countries_tags "array<varchar>" [note: 'Loc en:united-states']
+  nutriscore_grade varchar [note: 'a..e hoac unknown']
+  nova_group integer [note: '1 tu nhien .. 4 sieu che bien']
+  energy_kcal_100g float [note: 'tu nutriments.energy-kcal_100g']
+  sugars_100g float
+  fat_100g float
+  ingredients_text text
+  image_url varchar
+  _search_query varchar [note: 'Ten Instacart da dung de tim']
+  _product_id integer [note: 'product_id goc do crawler ghi kem']
+  _ingest_ts timestamp
+  Note: 'Semi-structured. Crawl theo lo, top ~2000 san pham pho bien.'
+}
+
+Table product_images {
+  off_code varchar [primary key]
+  path varchar [not null, note: 'landing/off_api/images/<code>.jpg']
+  length bigint [note: 'byte']
+  width integer
+  height integer
+  format varchar
+  modification_time timestamp
+  Note: 'Unstructured. Doc bang binaryFile.'
+}
+
+Table off_crawl_state {
+  product_id integer [primary key]
+  queried_at timestamp
+  status varchar [note: 'done | no_result | error | rate_limited']
+  attempts integer
+  batch_id varchar
+  Note: 'Trang thai crawler, de lan sau bo qua san pham da tra.'
+}
+
+// ============ 4. STREAMING - Event Hubs ============
+
+Table order_events {
+  event_id varchar [primary key, note: 'order-<order_id>, co dinh de khu trung']
+  event_type varchar [note: 'order_placed']
+  schema_version integer
+  order_id integer [not null]
+  user_id integer [not null]
+  order_number integer
+  order_dow integer
+  order_hour_of_day integer
+  days_since_prior_order float
+  event_time timestamp [note: 'Thoi diem gia lap = order_ts_sim']
+  replay_run_id varchar
+  items "array<struct<product_id,add_to_cart_order,reordered>>"
+  kafka_partition integer
+  kafka_offset bigint
+  enqueued_time timestamp [note: 'Thoi diem vao Event Hubs - chi dung cho van hanh']
+  Note: 'bronze.order_events. Dong goi lai tu orders + order_products__train.'
+}
+
+// ============ RELATIONSHIPS ============
+
+Ref: order_products__prior.order_id > orders.order_id
+Ref: order_products__prior.product_id > products.product_id
+Ref: order_products__train.order_id > orders.order_id
+Ref: order_products__train.product_id > products.product_id
+Ref: products.aisle_id > aisles.aisle_id
+Ref: products.department_id > departments.department_id
+
+Ref: product_prices.product_id > products.product_id
+Ref: promotions.product_id > products.product_id
+
+Ref: product_images.off_code - off_products.code
+Ref: off_crawl_state.product_id - products.product_id
+Ref: order_events.order_id - orders.order_id
+
+// TableGroup instacart_goc {
+//   orders
+//   order_products__prior
+//   order_products__train
+//   products
+//   aisles
+//   departments
+// }
+
+// TableGroup azure_sql_tu_sinh {
+//   product_prices
+//   promotions
+// }
+
+// TableGroup open_food_facts {
+//   off_products
+//   product_images
+//   off_crawl_state
+// }
+
+// TableGroup streaming {
+//   order_events
+// }
+
+// ============ SAMPLE RECORDS ============
+
+Records departments(department_id, department) {
+  4, 'produce'
+  7, 'beverages'
+  13, 'pantry'
+  19, 'snacks'
+}
+
+Records aisles(aisle_id, aisle) {
+  24, 'fresh fruits'
+  61, 'cookies cakes'
+  94, 'tea'
+  104, 'spices seasonings'
+}
+
+Records products(product_id, product_name, aisle_id, department_id) {
+  1, 'Chocolate Sandwich Cookies', 61, 19
+  2, 'All-Seasons Salt', 104, 13
+  3, 'Robust Golden Unsweetened Oolong Tea', 94, 7
+  24852, 'Banana', 24, 4
+}
+
+Records orders(order_id, user_id, eval_set, order_number, order_dow, order_hour_of_day, days_since_prior_order) {
+  2539329, 1, 'prior', 1, 2, 8, null
+  2398795, 1, 'prior', 2, 3, 7, 15.0
+  473747, 1, 'prior', 3, 3, 12, 21.0
+  1187899, 1, 'train', 11, 4, 8, 14.0
+}
+
+Records order_products__prior(order_id, product_id, add_to_cart_order, reordered) {
+  2539329, 1, 1, 0
+  2539329, 24852, 2, 0
+  2398795, 1, 1, 1
+}
+
+Records order_products__train(order_id, product_id, add_to_cart_order, reordered) {
+  1187899, 1, 1, 1
+  1187899, 24852, 2, 1
+}
+
+Records product_prices(price_id, product_id, unit_price, currency, valid_from, valid_to, updated_at) {
+  1, 24852, 0.29, 'USD', '2026-01-01', '2026-02-14', '2026-01-01 00:00:00'
+  2, 24852, 0.25, 'USD', '2026-02-15', '9999-12-31', '2026-02-15 00:00:00'
+  3, 1, 3.49, 'USD', '2026-01-01', '9999-12-31', '2026-01-01 00:00:00'
+}
+
+Records promotions(promo_id, product_id, promo_type, discount_pct, start_date, end_date, updated_at) {
+  'P0001', 24852, 'percent_off', 15, '2026-03-01', '2026-03-07', '2026-02-25 10:00:00'
+  'P0002', 1, 'bogo', 0, '2026-03-10', '2026-03-16', '2026-03-05 09:00:00'
+}
+
+Records off_products(code, product_name, brands, nutriscore_grade, nova_group, image_url, _search_query, _product_id) {
+  '0019320015403', 'Oreos', 'Nabisco', 'e', 4, 'https://images.openfoodfacts.org/images/products/001/932/001/5403/front_en.30.400.jpg', 'Chocolate Sandwich Cookies', 1
+}
