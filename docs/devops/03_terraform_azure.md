@@ -28,7 +28,7 @@ infra/
     40-orchestration/   # ADF linked service, dataset, pipeline, trigger (tài liệu 06)
     90-sandbox/         # Sub C/D — workspace #2 cho DS
   envs/
-    core.tfvars  stream.tfvars  sandbox-p4.tfvars
+    10-core.tfvars  20-stream.tfvars  30-databricks.tfvars  40-orchestration.tfvars  90-sandbox-p4.tfvars
 ```
 
 **Vì sao tách stack (mỗi stack một state):**

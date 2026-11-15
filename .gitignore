@@ -1,0 +1,48 @@
+# --- Terraform ---
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+# Giá trị riêng (subscription id, object id, email, IP): KHÔNG commit
+*.auto.tfvars
+*.auto.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# --- Databricks Asset Bundles ---
+.databricks/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# --- Power BI: chỉ commit PBIP dạng văn bản ---
+*.pbix
+powerbi/**/.pbi/localSettings.json
+powerbi/**/.pbi/cache.abf
+
+# --- Dữ liệu local ---
+data/
+*.zip
+*.csv
+!tests/fixtures/**/*.csv
+
+# --- OS / editor ---
+.DS_Store
+.idea/
+.vscode/
+.env

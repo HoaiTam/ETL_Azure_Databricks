@@ -1,0 +1,61 @@
+# Reusable workflow: login → init → plan → apply (chỉ khi có thay đổi).
+# Dùng bởi tf-apply.yml. Chạy trong environment có reviewer (mặc định prod).
+name: _tf-stack
+
+on:
+  workflow_call:
+    inputs:
+      stack:
+        type: string
+        required: true
+      environment:
+        type: string
+        default: prod
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      TF_VAR_subscription_id_a: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      TF_VAR_subscription_id_b: ${{ vars.AZURE_SUBSCRIPTION_B }}
+      TF_VAR_tfstate_account: ${{ vars.TFSTATE_ACCOUNT }}
+    defaults:
+      run:
+        working-directory: infra/stacks/${{ inputs.stack }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+          terraform_wrapper: false
+      - run: >-
+          terraform init -input=false
+          -backend-config=../../backend.hcl
+          -backend-config="storage_account_name=${{ vars.TFSTATE_ACCOUNT }}"
+      - id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock-timeout=5m -detailed-exitcode \
+            -var-file=../../envs/${{ inputs.stack }}.tfvars -out=tfplan
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ $code -eq 1 ]; then exit 1; fi
+      - if: steps.plan.outputs.exitcode == '2'
+        run: terraform apply -input=false -no-color -lock-timeout=5m tfplan
+      - if: steps.plan.outputs.exitcode == '0'
+        run: echo "::notice::${{ inputs.stack }} - No changes."

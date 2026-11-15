@@ -1,0 +1,38 @@
+# Apply sau khi merge vào main (docs/devops/04, mục 3.3).
+# 20-stream không nằm ở đây (stream-toggle.yml); bootstrap và 90-sandbox chạy tay.
+name: tf-apply
+
+on:
+  push:
+    branches: [main]
+    paths: ["infra/**", "adf/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: tf-apply
+  cancel-in-progress: false # không bao giờ hủy apply giữa chừng
+
+jobs:
+  core:
+    uses: ./.github/workflows/_tf-stack.yml
+    with:
+      stack: 10-core
+    secrets: inherit
+
+  databricks:
+    needs: core
+    uses: ./.github/workflows/_tf-stack.yml
+    with:
+      stack: 30-databricks
+    secrets: inherit
+
+  orchestration:
+    needs: databricks
+    uses: ./.github/workflows/_tf-stack.yml
+    with:
+      stack: 40-orchestration
+    secrets: inherit

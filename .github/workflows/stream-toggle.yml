@@ -1,0 +1,58 @@
+# Bật/tắt Event Hubs ở Sub B (docs/devops/04, mục 3.5).
+# Environment `stream`: không có required reviewer, chỉ cho nhánh main (lịch chạy đêm không có người duyệt).
+name: stream-toggle
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: up = apply, down = destroy
+        type: choice
+        options: [up, down]
+        default: up
+  schedule:
+    - cron: "0 17 * * *" # 00:00 giờ Việt Nam: luôn tắt
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: stream-toggle
+  cancel-in-progress: false
+
+jobs:
+  toggle:
+    runs-on: ubuntu-latest
+    environment: stream
+    env:
+      ACTION: ${{ github.event.inputs.action || 'down' }}
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_B }}
+      TF_VAR_subscription_id_a: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      TF_VAR_subscription_id_b: ${{ vars.AZURE_SUBSCRIPTION_B }}
+      TF_VAR_tfstate_account: ${{ vars.TFSTATE_ACCOUNT }}
+    defaults:
+      run:
+        working-directory: infra/stacks/20-stream
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_B }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+          terraform_wrapper: false
+      - run: >-
+          terraform init -input=false
+          -backend-config=../../backend.hcl
+          -backend-config="storage_account_name=${{ vars.TFSTATE_ACCOUNT }}"
+      - if: env.ACTION == 'up'
+        run: terraform apply -input=false -auto-approve -lock-timeout=5m -var-file=../../envs/20-stream.tfvars
+      - if: env.ACTION == 'down'
+        run: terraform destroy -input=false -auto-approve -lock-timeout=5m -var-file=../../envs/20-stream.tfvars

@@ -1,0 +1,11 @@
+# Sao chép thành bootstrap.auto.tfvars (đã nằm trong .gitignore) rồi điền giá trị thật.
+subscription_id_a = "00000000-0000-0000-0000-000000000000"
+location          = "" # region chốt ở G0
+github_repo       = "<owner>/<repo>"
+
+member_object_ids = {
+  p1 = "00000000-0000-0000-0000-000000000001"
+  p2 = "00000000-0000-0000-0000-000000000002"
+  p3 = "00000000-0000-0000-0000-000000000003"
+  p4 = "00000000-0000-0000-0000-000000000004"
+}

@@ -1,0 +1,97 @@
+# Kiểm tra tĩnh trên mọi PR (docs/devops/04, mục 3.1).
+# Status check bắt buộc trong branch protection: terraform, python, bundle.
+name: pr-checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write # chỉ job bundle dùng, và chỉ khi đã có DATABRICKS_HOST
+
+concurrency:
+  group: pr-checks-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir:
+          - bootstrap
+          - modules/naming_tags
+          - modules/dbx_workspace
+          - stacks/10-core
+          - stacks/20-stream
+          - stacks/30-databricks
+          - stacks/40-orchestration
+          - stacks/90-sandbox
+    defaults:
+      run:
+        working-directory: infra/${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate -no-color
+      - uses: terraform-linters/setup-tflint@v4
+      - run: tflint --init --config="$GITHUB_WORKSPACE/.tflint.hcl"
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: tflint --config="$GITHUB_WORKSPACE/.tflint.hcl" --format=compact
+
+  trivy:
+    # Chưa chặn merge (exit-code 0): xem kết quả trong log, sửa dần theo từng bước của 10-core.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: infra
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-java@v4 # pyspark cần JVM
+        with:
+          distribution: temurin
+          java-version: "17"
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest -q
+
+  bundle:
+    # `bundle validate` cần workspace (lookup cluster policy theo tên).
+    # Trước G1 chưa có DATABRICKS_HOST nên job chỉ in thông báo và báo xanh.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bỏ qua khi chưa có workspace
+        if: vars.DATABRICKS_HOST == ''
+        run: echo "::notice::Chưa đặt GitHub Variable DATABRICKS_HOST, bỏ qua bundle validate."
+      - uses: azure/login@v2
+        if: vars.DATABRICKS_HOST != ''
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      - uses: databricks/setup-cli@main
+        if: vars.DATABRICKS_HOST != ''
+      - run: databricks bundle validate -t dev
+        if: vars.DATABRICKS_HOST != ''
+        working-directory: bundles
+        env:
+          DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+          DATABRICKS_AUTH_TYPE: azure-cli

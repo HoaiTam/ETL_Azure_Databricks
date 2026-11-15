@@ -1,0 +1,110 @@
+# Plan và comment kết quả lên PR khi PR đụng infra/** (docs/devops/04, mục 3.2).
+# bootstrap (P1 chạy tay) và 90-sandbox (P4 chạy tay) không nằm trong CI.
+name: tf-plan
+
+on:
+  pull_request:
+    paths: ["infra/**"]
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: tf-plan-${{ github.head_ref }}
+  cancel-in-progress: true
+
+env:
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_A }}
+  TF_VAR_subscription_id_a: ${{ vars.AZURE_SUBSCRIPTION_A }}
+  TF_VAR_subscription_id_b: ${{ vars.AZURE_SUBSCRIPTION_B }}
+  TF_VAR_tfstate_account: ${{ vars.TFSTATE_ACCOUNT }}
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      stacks: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            10-core:
+              - infra/stacks/10-core/**
+              - infra/modules/**
+              - infra/envs/10-core.tfvars
+            20-stream:
+              - infra/stacks/20-stream/**
+              - infra/modules/**
+              - infra/envs/20-stream.tfvars
+            30-databricks:
+              - infra/stacks/30-databricks/**
+              - infra/envs/30-databricks.tfvars
+            40-orchestration:
+              - infra/stacks/40-orchestration/**
+              - infra/envs/40-orchestration.tfvars
+              - adf/**
+
+  plan:
+    needs: detect
+    if: needs.detect.outputs.stacks != '[]' && needs.detect.outputs.stacks != ''
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ${{ fromJson(needs.detect.outputs.stacks) }}
+    defaults:
+      run:
+        working-directory: infra/stacks/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+          terraform_wrapper: false
+      - run: >-
+          terraform init -input=false
+          -backend-config=../../backend.hcl
+          -backend-config="storage_account_name=${{ vars.TFSTATE_ACCOUNT }}"
+      - id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock-timeout=5m \
+            -var-file=../../envs/${{ matrix.stack }}.tfvars -out=tfplan > plan.log 2>&1
+          code=$?
+          set -e
+          if [ $code -eq 0 ]; then terraform show -no-color tfplan > plan.txt; else cp plan.log plan.txt; fi
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+      - uses: actions/github-script@v7
+        env:
+          STACK: ${{ matrix.stack }}
+          PLAN_EXIT: ${{ steps.plan.outputs.exitcode }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = `infra/stacks/${process.env.STACK}/plan.txt`;
+            let body = fs.readFileSync(path, 'utf8');
+            const max = 60000;
+            if (body.length > max) body = body.slice(0, max) + '\n… (đã cắt bớt, xem log của job)';
+            const ok = process.env.PLAN_EXIT === '0';
+            const marker = `<!-- tf-plan:${process.env.STACK} -->`;
+            const text = `${marker}\n### terraform plan · \`${process.env.STACK}\` ${ok ? '✅' : '❌'}\n\n<details><summary>Chi tiết</summary>\n\n\`\`\`\n${body}\n\`\`\`\n</details>`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const old = comments.find(c => c.body.startsWith(marker));
+            if (old) await github.rest.issues.updateComment({ owner, repo, comment_id: old.id, body: text });
+            else await github.rest.issues.createComment({ owner, repo, issue_number, body: text });
+      - if: steps.plan.outputs.exitcode != '0'
+        run: exit 1

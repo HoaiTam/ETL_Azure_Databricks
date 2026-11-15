@@ -1,0 +1,42 @@
+# Databricks Asset Bundles: "việc" (job, task, code). "Nền" (catalog, quyền, policy) ở infra/stacks/30-databricks.
+# Workspace lấy từ DATABRICKS_HOST (CI: GitHub Variable; local: profile của `databricks auth login`).
+#   databricks bundle validate -t dev
+#   databricks bundle deploy   -t dev
+bundle:
+  name: instacart
+
+include:
+  - resources/*.yml
+
+# Code nằm ở ../src (ngoài thư mục bundle) nên phải khai báo để được đồng bộ lên workspace.
+sync:
+  paths:
+    - .
+    - ../src
+
+variables:
+  catalog:
+    description: Catalog Unity Catalog của dự án
+    default: instacart
+  policy_id:
+    description: Cluster policy single-node (tạo ở 30-databricks), tra theo tên
+    lookup:
+      cluster_policy: instacart-single-node
+  ci_sp_id:
+    description: application_id của SP CI (= client id của UAMI id-github-ci). CI đặt qua BUNDLE_VAR_ci_sp_id.
+    default: ""
+
+targets:
+  dev:
+    mode: development # tiền tố [dev <user>], tạm dừng schedule
+    default: true
+
+  prod:
+    mode: production
+    workspace:
+      root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
+    run_as:
+      service_principal_name: ${var.ci_sp_id}
+    permissions:
+      - level: CAN_VIEW
+        group_name: users

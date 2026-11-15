@@ -1,0 +1,82 @@
+# Đưa code DE lên Databricks bằng Asset Bundles (docs/devops/04, mục 3.4).
+#   PR mở / cập nhật → deploy target dev
+#   PR đóng          → destroy target dev
+#   push main        → deploy target prod (environment prod, cần duyệt)
+# Mọi job bỏ qua khi chưa có GitHub Variable DATABRICKS_HOST (trước G1).
+name: de-deploy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths: ["src/**", "bundles/**"]
+  push:
+    branches: [main]
+    paths: ["src/**", "bundles/**"]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+  DATABRICKS_AUTH_TYPE: azure-cli # dùng phiên đăng nhập của azure/login (UAMI)
+
+jobs:
+  dev:
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && vars.DATABRICKS_HOST != ''
+    runs-on: ubuntu-latest
+    # Tất cả PR deploy bằng cùng SP CI vào cùng thư mục dev, nên chạy lần lượt.
+    concurrency:
+      group: de-deploy-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle deploy -t dev
+        working-directory: bundles
+      # TODO(G1): thêm job smoke-test trên dữ liệu mẫu rồi bật bước này
+      # - run: databricks bundle run -t dev smoke_test
+      #   working-directory: bundles
+
+  dev-cleanup:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && vars.DATABRICKS_HOST != ''
+    runs-on: ubuntu-latest
+    concurrency:
+      group: de-deploy-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle destroy -t dev --auto-approve
+        working-directory: bundles
+
+  prod:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.DATABRICKS_HOST != ''
+    runs-on: ubuntu-latest
+    environment: prod
+    concurrency:
+      group: de-deploy-prod
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      - uses: databricks/setup-cli@main
+      - run: databricks bundle deploy -t prod
+        working-directory: bundles
+        env:
+          BUNDLE_VAR_ci_sp_id: ${{ vars.AZURE_CLIENT_ID }} # job prod chạy bằng SP CI

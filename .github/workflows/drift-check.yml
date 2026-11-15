@@ -1,0 +1,70 @@
+# Phát hiện sửa tay trên Portal (docs/devops/04, mục 3.6): plan hằng tuần, có thay đổi thì mở issue `drift`.
+name: drift-check
+
+on:
+  schedule:
+    - cron: "0 1 * * 1" # 08:00 thứ Hai giờ Việt Nam
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+env:
+  ARM_USE_OIDC: "true"
+  ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_A }}
+  TF_VAR_subscription_id_a: ${{ vars.AZURE_SUBSCRIPTION_A }}
+  TF_VAR_subscription_id_b: ${{ vars.AZURE_SUBSCRIPTION_B }}
+  TF_VAR_tfstate_account: ${{ vars.TFSTATE_ACCOUNT }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [10-core, 30-databricks, 40-orchestration]
+    defaults:
+      run:
+        working-directory: infra/stacks/${{ matrix.stack }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+          terraform_wrapper: false
+      - run: >-
+          terraform init -input=false
+          -backend-config=../../backend.hcl
+          -backend-config="storage_account_name=${{ vars.TFSTATE_ACCOUNT }}"
+      - id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -lock=false -detailed-exitcode \
+            -var-file=../../envs/${{ matrix.stack }}.tfvars > plan.txt 2>&1
+          code=$?
+          set -e
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ $code -eq 1 ]; then cat plan.txt; exit 1; fi
+      - if: steps.plan.outputs.exitcode == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo "Plan hằng tuần của \`${{ matrix.stack }}\` phát hiện khác biệt giữa code và Azure."
+            echo "Có thể ai đó đã sửa tay trên Portal/Studio. Đưa thay đổi vào code qua PR, hoặc apply lại."
+            echo
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+          } > body.md
+          gh label create drift --color B60205 --description "Hạ tầng lệch khỏi Terraform" 2>/dev/null || true
+          gh issue create --title "Drift: ${{ matrix.stack }} ($(date -u +%F))" --label drift --body-file body.md

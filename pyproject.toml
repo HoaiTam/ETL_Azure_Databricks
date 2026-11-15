@@ -1,0 +1,29 @@
+[project]
+name = "instacart-etl"
+version = "0.1.0"
+description = "ETL Instacart trên Azure Databricks"
+requires-python = ">=3.11,<3.12" # khớp Databricks Runtime 15.4 LTS
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pyspark>=3.5.0,<3.6", # DBR 15.4 LTS = Spark 3.5
+    "pytest>=8",
+    "ruff>=0.8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

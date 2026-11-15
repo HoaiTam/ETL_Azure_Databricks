@@ -1,0 +1,14 @@
+# Thay các placeholder bằng GitHub username thật của từng vai (tài liệu docs/devops/00, mục 4):
+#   P1_HANDLE = Platform / DevOps   P2_HANDLE = DE batch
+#   P3_HANDLE = DE streaming        P4_HANDLE = BI / DS
+# Quy tắc ở dưới ghi đè quy tắc ở trên, nên dòng cụ thể đặt sau dòng chung.
+
+/infra/                       @P1_HANDLE
+/.github/                     @P1_HANDLE
+/infra/stacks/20-stream/      @P3_HANDLE @P1_HANDLE
+/bundles/                     @P2_HANDLE @P3_HANDLE
+/adf/                         @P2_HANDLE
+/src/batch/                   @P2_HANDLE
+/src/streaming/               @P3_HANDLE
+/powerbi/                     @P4_HANDLE
+/src/ml/                      @P4_HANDLE
