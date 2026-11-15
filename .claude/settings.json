@@ -20,7 +20,8 @@
       "Bash(databricks bundle validate:*)",
       "Bash(tflint:*)",
       "Bash(trivy config:*)",
-      "Bash(pre-commit run:*)"
+      "Bash(pre-commit run:*)",
+      "Bash(python3 scripts/commit_lint.py:*)"
     ],
     "ask": [
       "Bash(terraform plan:*)",

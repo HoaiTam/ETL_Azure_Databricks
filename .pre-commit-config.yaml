@@ -1,6 +1,10 @@
 # Cài: brew install pre-commit tflint && pre-commit install
 # Chạy tay trên toàn repo: pre-commit run --all-files
 # Phiên bản (rev) cập nhật bằng: pre-commit autoupdate
+# `pre-commit install` cài cả hook commit-msg nhờ dòng dưới (quy ước ở CONTRIBUTING.md).
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -34,3 +38,11 @@ repos:
     rev: v8.21.2
     hooks:
       - id: gitleaks # chặn lỡ commit connection string / key
+
+  - repo: local
+    hooks:
+      - id: commit-msg-lint
+        name: commit message theo CONTRIBUTING.md
+        entry: python3 scripts/commit_lint.py
+        language: system
+        stages: [commit-msg]

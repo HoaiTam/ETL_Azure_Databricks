@@ -1,0 +1,49 @@
+# Kiểm tiêu đề PR, commit message và mô tả PR theo CONTRIBUTING.md.
+# Status check bắt buộc trong branch protection: pr-lint / title, pr-lint / commits, pr-lint / body.
+# Luật nằm ở scripts/commit_lint.py (chỉ dùng thư viện chuẩn Python).
+name: pr-lint
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kiểm tiêu đề PR
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }} # qua env, không chèn thẳng vào run
+        run: python3 scripts/commit_lint.py --title "$PR_TITLE"
+
+  commits:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Kiểm mọi commit trong PR
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/commit_lint.py --range "$BASE_SHA..$HEAD_SHA"
+
+  body:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kiểm mô tả PR (Tóm tắt, Đã làm, Chưa làm, Cách kiểm tra, Ảnh hưởng)
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/pr_body.md"
+          python3 scripts/commit_lint.py --pr-body-file "$RUNNER_TEMP/pr_body.md"

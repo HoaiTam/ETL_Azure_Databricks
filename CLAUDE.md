@@ -32,6 +32,8 @@ Trước khi làm bất kỳ việc gì liên quan Databricks (`bundles/`, `src/
 | Thành phần | Dùng khi |
 |---|---|
 | `/check [infra\|python\|bundle]` | Trước khi commit hoặc mở PR |
+| `/commit` | Mỗi khi người dùng bảo commit: message tiếng Anh, kiểm bằng `scripts/commit_lint.py` |
+| `/pr` | Mỗi khi người dùng bảo tạo PR: tiêu đề tiếng Anh, mô tả tiếng Việt đủ mục Đã làm / Chưa làm |
 | `/tf-step <stack> <bước>` | Làm tiếp một bước hạ tầng |
 | `/gate-check G1` | Kiểm tra cổng đã đủ điều kiện mở chưa |
 | Agent `infra-reviewer`, `data-reviewer` | Review độc lập trước khi mở PR |

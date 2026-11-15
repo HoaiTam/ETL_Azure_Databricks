@@ -36,6 +36,7 @@ rules = [
     (r"az\s+(group|resource)\s+delete\b", "Không xóa tài nguyên Azure từ Claude; dùng terraform qua PR.", False),
     (r"az\s+keyvault\s+secret\s+(show|download)\b", "Không in giá trị secret ra màn hình.", False),
     (r"git\s+push\b.*(--force\b|--force-with-lease\b|\s-f\b)", "Không force-push.", False),
+    (r"git\s+(commit\b.*(--no-verify\b|\s-n\b)|push\b.*--no-verify\b)","Không lách hook (--no-verify); sửa lỗi theo CONTRIBUTING.md.", False),
     (r"(cat|head|tail|less|more|bat|sed|awk|grep|rg|cp|scp|curl)\b.*[\w./-]+\.(auto\.tfvars|tfstate)(?![\w.])", "Không đọc *.auto.tfvars / *.tfstate (chứa ID và giá trị nhạy cảm).", False),
 ]
 for seg in segments:

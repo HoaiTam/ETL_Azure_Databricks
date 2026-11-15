@@ -94,6 +94,7 @@ uv sync                                   # Python 3.11 + pyspark 3.5 (khớp DB
 uv run pytest -q                          # toàn bộ test (cần Java 17+)
 uv run pytest tests/test_common_spark.py::test_add_ingest_metadata_adds_columns   # một test
 uv run ruff check . && uv run ruff format --check .
+python3 scripts/commit_lint.py --message "feat(infra): add core storage"   # kiểm commit message
 ```
 
 ```bash
@@ -116,7 +117,7 @@ databricks bundle validate -t dev         # chạy trong bundles/, cần DATABRI
 - `databricks bundle deploy|destroy -t prod`.
 - `az group delete`, `az resource delete`.
 - `az keyvault secret show`.
-- `git push --force`.
+- `git push --force`, `git commit --no-verify`.
 - Apply chỉ đi qua PR → workflow `tf-apply`. Ngoại lệ: `bootstrap` và secret scope Key Vault do P1 tự chạy.
 - Với Claude Code, các lệnh trên đã bị chặn bằng hook. **Agent khác phải tự tuân thủ.**
 
@@ -143,9 +144,32 @@ databricks bundle validate -t dev         # chạy trong bundles/, cần DATABRI
 - Không dùng Mermaid hay ASCII art trong tài liệu.
 
 **Quy ước viết**
-- Tài liệu và comment viết bằng tiếng Việt.
-- Commit theo dạng `docs: …`, `feat(infra): …`, `fix(de): …`.
-- Nhánh theo dạng `feat/<vai>-<việc>`.
+- Tài liệu và comment trong code viết bằng tiếng Việt.
+
+## Commit và Pull Request (bắt buộc)
+
+Chi tiết và ví dụ ở `CONTRIBUTING.md`. Luật được kiểm bằng `scripts/commit_lint.py` (hook `commit-msg` và workflow `pr-lint`); sai là CI báo đỏ, không merge được.
+
+**Ngôn ngữ:** tên nhánh, commit message, tiêu đề PR viết **tiếng Anh**. Mô tả PR viết **tiếng Việt** có dấu.
+
+**Commit:** `<type>(<scope>): <subject>`
+- `type`: `feat` `fix` `docs` `refactor` `test` `perf` `ci` `build` `chore` `style` `revert`.
+- `scope`: `infra` `de` `stream` `bundle` `adf` `bi` `ds` `ci` `docs` `deps` `agents`.
+- `subject`: động từ mệnh lệnh, chữ thường đầu, không dấu chấm cuối, dòng đầu ≤ 72 ký tự, nói rõ thay đổi gì ở đâu. Cấm `update`, `fix bug`, `wip`, `misc`…
+- Thân (nếu có) bằng tiếng Anh, giải thích vì sao. Agent thêm `Co-Authored-By:` ở footer.
+- Một commit một thay đổi logic. Trước khi commit, chạy `python3 scripts/commit_lint.py --message "<message>"`.
+- Không `--no-verify`, không commit thẳng vào `main`, chỉ commit khi người dùng yêu cầu.
+
+**Nhánh:** `<type>/<vai>-<việc>`, ví dụ `feat/p1-core-storage`.
+
+**PR**
+- Tiêu đề cùng định dạng commit (merge bằng squash nên tiêu đề thành commit trên `main`).
+- Mô tả theo `.github/pull_request_template.md`, đủ 5 mục không được trống:
+  `## Tóm tắt`, `## Đã làm`, `## Chưa làm / để PR sau`, `## Cách kiểm tra`, `## Ảnh hưởng`.
+- **Đã làm**: chỉ ghi việc có trong diff và đã xong. **Chưa làm**: ghi trung thực mọi việc dở, bước bị bỏ qua, giả định chưa kiểm; không có thì ghi `Không có`.
+- Thứ chưa chạy thử phải ghi "chưa kiểm" ở **Cách kiểm tra**.
+- Tạo bằng `gh pr create --title "…" --body-file <file>` (CLI không tự áp template). Kiểm thân trước: `python3 scripts/commit_lint.py --title "…" --pr-body-file <file>`.
+- Chỉ push và mở PR khi người dùng đồng ý.
 
 ## Databricks agent skills (bắt buộc khi làm phần Databricks)
 
@@ -181,6 +205,8 @@ Các file dưới đây là checklist viết bằng văn bản. Claude Code gọ
 | Việc | File |
 |---|---|
 | Kiểm tra local như CI trước khi commit/PR | `.claude/skills/check/SKILL.md` |
+| Soạn và tạo commit đúng quy ước | `.claude/skills/commit/SKILL.md` |
+| Soạn và mở Pull Request | `.claude/skills/pr/SKILL.md` |
 | Làm một bước Terraform theo checklist stack | `.claude/skills/tf-step/SKILL.md` |
 | Đối chiếu cổng G0–G5 | `.claude/skills/gate-check/SKILL.md` |
 | Review thay đổi hạ tầng | `.claude/agents/infra-reviewer.md` |

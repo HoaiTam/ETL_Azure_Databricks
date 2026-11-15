@@ -45,10 +45,10 @@ argument-hint: "<stack> <bước>   ví dụ: 10-core 3.2 | 30-databricks 3"
 
 6. **Đánh dấu** `[x]` cho bước vừa làm trong checklist ở `main.tf`.
 
-7. **Soạn mô tả PR** theo `.github/pull_request_template.md`, gồm:
-   - Thay đổi gì.
-   - Tài nguyên mới và chi phí ước tính (Azure for Students, 100 USD).
-   - Quyền mới.
-   - Cách kiểm tra, theo checklist cuối stack trong tài liệu.
+7. **Soạn commit và PR** theo `CONTRIBUTING.md` (quy trình ở skill `/commit` và `/pr`), chỉ thực hiện khi người dùng yêu cầu:
+   - Commit/tiêu đề tiếng Anh, ví dụ `feat(infra): add core storage account (10-core step 3.2)`.
+   - Mô tả PR tiếng Việt: "Đã làm" là bước vừa tick; "Chưa làm" là các bước còn `[ ]` liên quan và mọi thứ chưa kiểm.
+   - "Ảnh hưởng": tài nguyên mới, chi phí ước tính (Azure for Students, 100 USD), quyền mới.
+   - "Cách kiểm tra": theo checklist cuối stack trong tài liệu.
 
 Không chạy `terraform plan` hay `apply`. Plan sẽ chạy trên PR qua workflow `tf-plan`.
