@@ -391,3 +391,18 @@ Tỉ lệ khớp thực tế **chưa đo**, cần làm trong giai đoạn spike.
 | `silver.dim_product`       | `products` + `aisles` + `departments` + giá + khuyến mãi + OFF   | Danh mục sản phẩm đã làm giàu                                        |
 | `silver.baskets`           | `order_items` gom theo đơn                                        | Đầu vào phần DS: `split = prior` để train, `holdout` để đánh giá |
 | `silver.quarantine_*`      | Bản ghi vi phạm luật chất lượng dữ liệu (mỗi nguồn một bảng) | Lưu lỗi kèm lý do (`_dq_failed`), không xóa im lặng                  |
+
+## 7. Dữ liệu cho Data Science
+
+Chi tiết cách dựng ở [de/08](../de/08_du_lieu_cho_ds.md); cách dùng ở [ds/01](../ds/01_du_lieu_thuc_nghiem.md).
+
+| Bảng | Hạt | Cột chính | Vai trò |
+| --- | --- | --- | --- |
+| `ds_data.baskets` | phiên bản × đơn | `data_version`, `order_id`, `split`, `items` (product_id) | Bản cố định của `silver.baskets`. `v1` không bao giờ bị ghi đè |
+| `ds_data.item_index` | phiên bản × cấp × item | `grain` (`product`/`aisle`/`department`), `item_key`, `idx`, `freq_prior` | `idx` đánh từ 0 theo tần suất giảm dần trong `prior`; "top-N item" = `idx < N` |
+| `ds_data.transactions` | phiên bản × cấp × đơn | `items` (mảng `idx` tăng dần), `n_items`, `scale_bucket` (0–99) | Đầu vào của DApriori, DATID, FP-Growth. `scale_bucket < p` lấy p% số giỏ, các tập con lồng nhau |
+| `ds_data.holdout_eval` | phiên bản × đơn holdout | `eval_part` (`val`/`test`), `context`, `targets` | Đánh giá gợi ý: nửa đầu giỏ theo thứ tự bỏ vào làm ngữ cảnh, nửa sau làm đáp án |
+| `ml.experiment_runs` | một lần chạy thực nghiệm | `run_key`, `experiment` (E1–E7), `platform`, `algo`, tham số, thời gian, bộ nhớ, số tập / số luật | Nguồn sự thật của báo cáo thực nghiệm. `platform` phân biệt Databricks, Spark on YARN, MapReduce |
+| `ml.frequent_itemsets`, `ml.association_rules` | `run_key` × tập / luật | `items` / `antecedent`, `consequent`, `support`, `confidence`, `lift` | Chỉ lưu cho các lần chạy E7 (và lần được đánh dấu `persist`) |
+| `ml.holdout_metrics` | `run_key` × `min_confidence` × `eval_part` × k | HitRate, Precision, Recall @k, coverage | Chọn champion; so với baseline phổ biến |
+| `gold.association_rules`, `gold.recommendations`, `gold.experiment_metrics`, `gold.holdout_metrics` | View | Luật có tên sản phẩm; top 10 món mua kèm; trung vị + speedup | Power BI trang 2, 6, 7 |
