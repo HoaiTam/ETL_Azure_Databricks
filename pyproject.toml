@@ -16,13 +16,13 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "scripts"]
 testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
 target-version = "py311"
-src = ["src", "tests"]
+src = ["src", "tests", "scripts"]
 extend-exclude = ["docs"]
 
 [tool.ruff.lint]

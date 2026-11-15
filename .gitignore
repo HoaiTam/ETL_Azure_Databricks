@@ -46,3 +46,7 @@ powerbi/**/.pbi/cache.abf
 .idea/
 .vscode/
 .env
+
+# --- Claude Code: cấu hình riêng từng người ---
+.claude/settings.local.json
+CLAUDE.local.md
