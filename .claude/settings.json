@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(terraform fmt:*)",
+      "Bash(terraform validate:*)",
+      "Bash(terraform version:*)",
+      "Bash(terraform providers:*)",
+      "Bash(terraform init -backend=false:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(az account show:*)",
+      "Bash(az account list:*)",
+      "Bash(databricks bundle validate:*)",
+      "Bash(tflint:*)",
+      "Bash(trivy config:*)",
+      "Bash(pre-commit run:*)"
+    ],
+    "ask": [
+      "Bash(terraform plan:*)",
+      "Bash(terraform init:*)",
+      "Bash(databricks bundle deploy:*)",
+      "Bash(databricks bundle run:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh variable set:*)",
+      "Bash(az role assignment create:*)"
+    ],
+    "deny": [
+      "Read(**/*.auto.tfvars)",
+      "Read(**/*.auto.tfvars.json)",
+      "Read(**/*.tfstate)",
+      "Read(**/*.tfstate.*)",
+      "Read(**/.env)",
+      "Edit(**/*.tfstate)",
+      "Edit(**/*.tfstate.*)",
+      "Bash(terraform apply:*)",
+      "Bash(terraform destroy:*)",
+      "Bash(terraform force-unlock:*)",
+      "Bash(terraform state rm:*)",
+      "Bash(terraform state push:*)",
+      "Bash(databricks bundle deploy -t prod:*)",
+      "Bash(databricks bundle destroy -t prod:*)",
+      "Bash(az group delete:*)",
+      "Bash(az resource delete:*)",
+      "Bash(az keyvault secret show:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/guard_bash.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/format_on_edit.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
