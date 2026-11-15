@@ -57,7 +57,9 @@
 
 Nhóm đã chọn **Lakeflow Declarative Pipelines** (LDP, edition Advanced) cho bronze → silver → gold. Job chỉ còn điều phối pipeline và các task phụ trợ:
 
-`pipeline_batch (LDP instacart_batch) → create_views → collect_dq ∥ reconcile → refresh_bi → (train_rules → evaluate_register, thêm ở G5)`
+`pipeline_batch (LDP instacart_batch) → create_views → collect_dq ∥ reconcile → refresh_bi`
+
+Phần DS **không** gắn vào job này: hình kiến trúc 2 có vẽ `train_rules → evaluate_register`, nhưng kế hoạch đã tách thành các job DS chạy tay ([de/06 §2](../de/06_van_hanh_chay_lai.md), [ds/04 §5](../ds/04_thuc_nghiem_danh_gia.md)).
 
 | Task | Loại | Ghi chú triển khai |
 |---|---|---|
@@ -195,9 +197,9 @@ Thông tin đăng nhập nguồn trên Service: OAuth bằng tài khoản P4, ho
 - [ ] `silver.dim_product` = **49.688 dòng** (LEFT JOIN không làm mất hay nhân dòng).
 - [ ] `silver.baskets` chỉ có split `prior | holdout`, không có đơn test (đơn test không có món).
 - [ ] `silver.quarantine` có số dòng được giải thích được (ghi trong `ops.dq_results`).
-- [ ] Ghi Delta version của `silver.baskets` vào tài liệu để DS dùng làm mốc cố định.
+- [ ] Chạy job `ds-prepare`: `ds_data.*` với `data_version = 'v1'` và file txt cho Hadoop đã sẵn sàng, task `check` xanh ([de/08 §7](../de/08_du_lieu_cho_ds.md)).
 
-Đạt hết thì P4 dựng `90-sandbox` (hoặc dùng Sub A ngoài giờ batch) và bắt đầu FP-Growth.
+Đạt hết thì DS bắt đầu ([ds/00 §5](../ds/00_tong_quan_ds.md)): chạy trên Sub A ngoài giờ batch, hoặc trên `90-sandbox` nếu Sub C cùng region.
 
 ### 6.4 G4: dashboard đạt rubric
 - [ ] App Power BI có ≥ 4 trang, điều hướng bằng nút và page navigator.
@@ -208,13 +210,24 @@ Thông tin đăng nhập nguồn trên Service: OAuth bằng tài khoản P4, ho
 - [ ] Bảng `ops.benchmark_results`: CSV, Parquet, Delta, Delta có OPTIMIZE (rubric 3.1, 3.4).
 - [ ] Bảng chi phí theo tag `owner`/`stack` trong Cost Management + ảnh chụp quota vCPU (rubric 5.4).
 
-## 7. Sau G4: chuẩn bị cho DS (G5, viết ở tài liệu DS)
+## 7. Sau G3/G4: phần Data Science (cổng G5)
 
-Hạ tầng sẽ cần thêm:
-- MLflow experiment trong `/Shared/instacart`, artifact lưu ở container `mlflow`.
-- Model đăng ký vào UC tại `instacart.ml.*`.
-- Model serving endpoint (serverless, nếu dùng được).
-- Azure Function (FaaS) làm API proxy cho trang web gọi model.
-- Bảng `ml.experiment_results` để Power BI vẽ kết quả theo tham số (`min_support`, `min_confidence`, số partition).
+Kế hoạch chi tiết nằm ở [docs/ds](../ds/00_tong_quan_ds.md). Hạ tầng DS đã được thêm vào các tài liệu DevOps:
 
-Các thành phần này sẽ được thêm thành bước mới trong `10-core`, `30-databricks` và `bundles/`, theo cùng quy trình PR → plan → apply.
+| Thành phần | Ở đâu | Khi nào |
+|---|---|---|
+| Container `ds` (exports, inbox, serving) | [03 bước 3.2](03_terraform_azure.md) | Cùng `10-core` (không tốn thêm tiền) |
+| Danh tính `id-func-recommend` | [03 bước 3.4](03_terraform_azure.md) | Cùng `10-core` |
+| Schema `ds_data`, volume `ds_data.exports`, `ml.inbox`, quyền | [05 bước 3–5](05_databricks_platform.md) | Cùng `30-databricks` |
+| Policy `instacart-ds-benchmark` (cho chọn `local[n]`) | [05 bước 6](05_databricks_platform.md) | Trước G3 |
+| Job `ds-prepare` (DE), `ds-benchmark`, `ds-champion` (DS); MLflow experiment; serving endpoint | [05 §4](05_databricks_platform.md), [de/08](../de/08_du_lieu_cho_ds.md), [ds/04](../ds/04_thuc_nghiem_danh_gia.md), [ds/05](../ds/05_mlflow_serving_bao_cao.md) | Từ G3 |
+| Azure Function làm API (stack `50-serving`) | [03 §5.1](03_terraform_azure.md), [04 §3.8](04_github_actions_cicd.md) | G5, tùy chọn |
+| Cụm Hadoop HDFS + YARN (Docker, máy local) | [ds/03](../ds/03_hadoop_mapreduce_local.md) | Từ G0 (dựng thử), đo ở G5 |
+
+### 7.1 Checklist G5: phần DS đạt
+
+Checklist đầy đủ ở [ds/05 §6](../ds/05_mlflow_serving_bao_cao.md). Tóm tắt:
+- [ ] E1–E7 có đủ kết quả trong `ml.experiment_runs` / `ml.holdout_metrics`; E1 khớp ở cả 3 cấp item.
+- [ ] Kết quả MapReduce và Spark (E6) từ máy local đã nạp lên, từ cùng một máy.
+- [ ] Model `instacart.ml.basket_rules@champion`; API trả lời được (Model Serving, hoặc Function theo phương án B).
+- [ ] Power BI trang 6–7 đã publish.

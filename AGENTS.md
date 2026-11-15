@@ -20,7 +20,8 @@ Cách tổ chức các file hướng dẫn:
 | Việc | Đọc |
 |---|---|
 | Hạ tầng, CI/CD, Unity Catalog, cổng G0–G5 | `docs/devops/00_tong_quan.md` → file 01–06 |
-| Pipeline dữ liệu (ingest, bronze, silver, gold, streaming, chạy lại) | `docs/de/00_tong_quan_de.md` → file 01–07 |
+| Pipeline dữ liệu (ingest, bronze, silver, gold, streaming, chạy lại, dữ liệu cho DS) | `docs/de/00_tong_quan_de.md` → file 01–08 |
+| Data Science (DApriori/DATID/FP-Growth, thực nghiệm, Hadoop MapReduce local, MLflow, API) | `docs/ds/00_tong_quan_ds.md` → file 01–05 |
 | Ý nghĩa bảng, cột, khóa, số dòng đối soát | `docs/data/data_dictionary.md` |
 | Kiến trúc tổng thể | `docs/architecture/*.png` |
 

@@ -32,6 +32,7 @@
 | `dim_date`, `dim_department` | ngày / ngành | Dim chung | Nhỏ |
 | `bi_user_access` | email × department | RLS | Nhỏ |
 | `stream_kpi_1m`, `stream_pair_counts_10m` | phút / cửa sổ 10 phút | Trang 5, tile real-time | Nhỏ ([04](04_streaming.md)) |
+| View DS: `association_rules`, `recommendations`, `experiment_metrics`, `holdout_metrics` | luật / cặp gợi ý / tổ hợp thực nghiệm | Trang 2, 6, 7 | Nhỏ. **View**, do job DS tạo ([ds/05 §4](../ds/05_mlflow_serving_bao_cao.md)), không thuộc pipeline `instacart_batch` |
 
 ## 2. Code
 
@@ -133,7 +134,7 @@ def product_360():
 
 @dp.materialized_view(name=f"{GOLD}.product_pair_counts", cluster_by=["p1"])
 def product_pair_counts():
-    # Baseline DE cho trang 2. Luật kết hợp đầy đủ (FP-Growth) là việc của DS (G5).
+    # Baseline DE cho trang 2. Luật kết hợp đầy đủ là gold.association_rules / recommendations của DS (ds/05 §4).
     return spark.sql(f"""
       WITH top AS (SELECT product_id FROM {GOLD}.product_360 ORDER BY times_ordered DESC LIMIT 5000),
            b AS (SELECT e.order_id, array_sort(collect_list(e.product_id)) AS items      -- giữ món thuộc top

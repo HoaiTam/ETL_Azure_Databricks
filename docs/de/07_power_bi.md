@@ -8,6 +8,7 @@
 **Đầu ra:**
 - Báo cáo `powerbi/instacart.pbip` (lưu trong repo, dạng text).
 - Semantic model có RLS, 4 trang (+1 trang vận hành) kèm điều hướng và mobile layout.
+- Ở G5: thêm trang 6 (luật kết hợp) và trang 7 (thực nghiệm thuật toán) từ view DS ([ds/05 §5](../ds/05_mlflow_serving_bao_cao.md)).
 - Dashboard có tile real-time; App "Instacart Analytics".
 
 **Xong khi:** đạt checklist G4 ở mục 9 (trùng với [devops/06 §6.4](../devops/06_de_den_dashboard.md)).
@@ -43,6 +44,9 @@ Lưu bằng *File → Save as → Power BI Project (.pbip)* vào `powerbi/`. Th�
 | `stream_kpi_1m` | **DirectQuery** | Fact real-time | Trang 5 |
 | `ops.streaming_latency` | **DirectQuery** | Vận hành | Trang 5 |
 | `ops.dq_results`, `ops.reconciliation` | Import | Vận hành | Trang 5 |
+| `recommendations` (view DS) | Import | Fact | Trang 2: "Gợi ý theo luật" cạnh bảng `product_pair_counts`. Có từ G5 |
+| `association_rules` (view DS) | Import | Fact | Trang 6. Không nối `dim_department` nên RLS không lọc bảng này: luật là tri thức chung, không phải số bán theo ngành |
+| `experiment_metrics`, `holdout_metrics` (view DS) | Import | Kết quả thực nghiệm | Trang 7. Bảng rời, không quan hệ |
 
 **Quan hệ** (đều là một-nhiều, lọc một chiều):
 
@@ -53,6 +57,8 @@ dim_department[department_id]   1 ─→ * department_sales[department_id]
 dim_department[department_id]   1 ─→ * product_360[department_id]
 product_360[product_id]         1 ─→ * product_pair_counts[p1]      (active)
 product_360[product_id]         1 ─→ * product_pair_counts[p2]      (inactive, dùng USERELATIONSHIP)
+product_360[product_id]         1 ─→ * recommendations[product_id]                       (G5)
+product_360[product_id]         1 ─→ * association_rules[consequent_product_id]          (G5, drill-through)
 ```
 
 Ẩn mọi cột khóa ở phía nhiều. Ẩn các cột kỹ thuật (`dup_cnt`, `n`, `off_match_score`).
@@ -106,6 +112,8 @@ CALCULATE ( SUM ( stream_kpi_1m[orders] ),
 | **3 · Bộ lọc 1: thời gian mua** | Ma trận nhiệt `order_dow` × `order_hour_of_day` (`kpi_by_dow_hour`); đường Orders theo ngày | Slicer ngày; bookmark "Theo giờ" / "Theo tuần" |
 | **4 · Bộ lọc 2: danh mục** | Treemap Dept Revenue theo department → aisle; bảng top sản phẩm (`product_360`); cột Promo Item Share | Slicer department / aisle; chuột phải → *Drill through* sang trang 2 |
 | 5 · Vận hành & real-time | Thẻ `Orders last 5 min`; đường `stream_kpi_1m`; p50/p95 độ trễ theo `eh_region`; bảng `dq_results`, `reconciliation` | Auto page refresh (mục 6) |
+| 6 · Luật kết hợp (G5) | Bảng luật (vế trái → vế phải, support, confidence, lift); scatter support × confidence, cỡ điểm theo lift; thẻ số luật | Slicer `confidence`, `lift`, `antecedent_size`; drill-through sang trang 2 theo `consequent_product_id` |
+| 7 · Thực nghiệm thuật toán (G5) | Thời gian theo MinSupp / quy mô / số item; speedup và efficiency theo core; MapReduce và Spark; HitRate@10 kèm baseline | Slicer `experiment`, `grain`, `platform`, `algo`; bookmark "Hiệu năng" / "Chất lượng luật". Danh sách biểu đồ ở [ds/04 §8](../ds/04_thuc_nghiem_danh_gia.md) |
 
 **Điều hướng** (rubric yêu cầu ≥ 4 report và có điều hướng):
 1. *Insert → Buttons → Navigator → Page navigator* ở thanh trên cùng mọi trang. Ẩn trang 2 khỏi navigator, vì trang này chỉ vào qua drill-through.
@@ -187,7 +195,7 @@ Nếu tenant chặn service principal thì `refresh_bi.py` chỉ ghi dòng "skip
    - Page navigator dạng dọc.
 2. **Publish:** *Home → Publish → instacart-bi*. Đặt tên semantic model `instacart`.
 3. **App:** *Workspace → Create app → Instacart Analytics*.
-   - Thêm audience *Quản lý ngành hàng* (thấy trang 1–4) và *Ban điều hành* (thấy cả trang 5).
+   - Thêm audience *Quản lý ngành hàng* (thấy trang 1–4) và *Ban điều hành* (thấy cả trang 5). Từ G5, cả hai audience thấy thêm trang 6–7.
    - Thêm người xem theo email hoặc nhóm Entra.
 4. **Không** dùng *Publish to web*, vì RLS sẽ mất ([devops/06 §5.1](../devops/06_de_den_dashboard.md)).
 5. Mở app Power BI Mobile, đăng nhập bằng tài khoản người xem và chụp màn hình từng trang.
@@ -202,3 +210,5 @@ Nếu tenant chặn service principal thì `refresh_bi.py` chỉ ghi dòng "skip
 - [ ] Trang 5 hiển thị độ trễ cùng / khác region từ `ops.streaming_latency`.
 - [ ] Tổng Orders trên trang 1 = `SELECT sum(orders) FROM gold.kpi_daily` (khớp số liệu nguồn).
 - [ ] File `powerbi/*.pbip` đã commit, không có `cache.abf` hay thông tin đăng nhập.
+
+Trang 6–7 không thuộc G4; chúng được kiểm ở checklist G5 ([ds/05 §6](../ds/05_mlflow_serving_bao_cao.md)).

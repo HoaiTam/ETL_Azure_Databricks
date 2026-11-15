@@ -19,7 +19,7 @@
 | `orders`, `order_items` | **View** UC | Gộp batch ∪ stream |
 | `baskets` | Materialized view | Đầu vào DS |
 
-**Xong khi:** đạt checklist G3 ở mục 8. Từ đó **DS bắt đầu**.
+**Xong khi:** đạt checklist G3 ở mục 9. Sau đó chạy job `ds-prepare` ([08](08_du_lieu_cho_ds.md)) rồi **DS bắt đầu**.
 
 ---
 
@@ -514,4 +514,4 @@ Số đơn batch được tính bằng 3.421.083 − 131.209. Số giỏ `prior`
 
 - [ ] Các con số khớp, và `ops.reconciliation` ghi `passed = true` cho mọi bảng.
 - [ ] `silver.quarantine_*` có số dòng giải thích được, đã ghi vào `ops.dq_results`.
-- [ ] Ghi `DESCRIBE HISTORY instacart.silver.baskets` (version mới nhất) vào [devops/06 §6.3](../devops/06_de_den_dashboard.md) để DS dùng làm mốc cố định: `SELECT * FROM instacart.silver.baskets VERSION AS OF <n>`.
+- [ ] Chạy job `ds-prepare` để chụp `silver.baskets` thành `ds_data.baskets` (`data_version = 'v1'`) và dựng dữ liệu thực nghiệm cho DS ([08](08_du_lieu_cho_ds.md)). Không dùng `VERSION AS OF` trên `baskets`: đây là materialized view do pipeline quản lý, bản cố định phải là một bảng riêng.

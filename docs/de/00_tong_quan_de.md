@@ -12,7 +12,8 @@
 | 4 | [04_streaming.md](04_streaming.md) | Simulator → Event Hubs → bronze/silver/gold gần thời gian thực, phát lại | P3 |
 | 5 | [05_gold_serving.md](05_gold_serving.md) | Bảng gold cho BI, tối ưu lưu trữ, benchmark | P2, P4 |
 | 6 | [06_van_hanh_chay_lai.md](06_van_hanh_chay_lai.md) | Lỗi ở đâu thì chạy lại thế nào để không mất, không trùng | P2, P3 |
-| 7 | [07_power_bi.md](07_power_bi.md) | Dựng semantic model, 4 trang, RLS, mobile | P4 |
+| 7 | [07_power_bi.md](07_power_bi.md) | Dựng semantic model, 4 trang, RLS, mobile (+ trang 6–7 cho DS) | P4 |
+| 8 | [08_du_lieu_cho_ds.md](08_du_lieu_cho_ds.md) | Snapshot và chuẩn bị dữ liệu thực nghiệm cho DS, xuất file cho Hadoop local | P2 |
 
 ---
 
@@ -34,6 +35,7 @@
 | 8 | Batch + stream **nhập lại ở silver** | View `silver.orders`, `silver.order_items` (UNION ALL) | — | 03 |
 | 9 | `silver.*` → `gold.*` | Materialized view, streaming table cửa sổ | Tổng hợp | 05, 04 |
 | 10 | `gold.*` → Power BI | Serverless SQL warehouse | Import / DirectQuery / push | 07 |
+| 11 | `silver.baskets` → `ds_data.*` + file txt cho Hadoop | Job `ds-prepare` (chạy tay sau G3) | Snapshot có phiên bản | 08 |
 
 **Điều phối:**
 - ADF `pl_master` (02:00 hằng ngày): bước 2 → bước 3 → gọi Databricks Job `instacart-batch-medallion`. Job này chạy pipeline `instacart_batch` (bước 5, 7, 8, 9) và các task phụ trợ.
@@ -159,7 +161,7 @@ Bám theo cổng ở [devops/00 §3](../devops/00_tong_quan.md):
 | G0 | Viết code local với dữ liệu mẫu 1% (Docker Spark, hoặc `databricks-connect`); thử CDC trên SQL free offer | Spike đạt |
 | G1 | 01 (Zenodo + CDC snapshot) → 02 | Số dòng bronze = file nguồn |
 | G2 | 04 phần bronze | 1.000 sự kiện thử vào bronze, phát lại không nhân dòng silver |
-| G3 | 03 + 04 phần silver | Đối soát silver đạt → **DS bắt đầu** |
+| G3 | 03 + 04 phần silver, rồi 08 | Đối soát silver đạt → chạy `ds-prepare` → **DS bắt đầu** ([ds/00](../ds/00_tong_quan_ds.md)) |
 | G4 | 05 + 07 | Dashboard đạt rubric |
 
 ## 6. Cấu trúc code trong repo
@@ -183,6 +185,7 @@ src/
 │       ├── silver_events.py
 │       └── gold_stream.py
 ├── tasks/                         # task của job: create_views.sql, reconcile, collect_dq, refresh_bi
+│   └── ds_prepare/                # job ds-prepare: snapshot, item_index, transactions, holdout, export (08)
 └── streaming/simulator/           # producer chạy local
 adf/pipelines/*.json               # activities_json cho Terraform
 bundles/resources/                 # job + pipeline (DAB)

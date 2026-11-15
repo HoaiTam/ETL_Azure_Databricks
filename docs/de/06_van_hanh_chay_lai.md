@@ -80,6 +80,12 @@ resources:
 
 `refresh_bi` cần Python để gọi REST nên dùng job cluster. Nó chạy sau cùng, lúc đó cluster pipeline đã tắt.
 
+**Job của DS không nằm trong batch job.** Hình kiến trúc 2 vẽ `train_rules → evaluate_register` sau `build_gold`. Kế hoạch đã tách thành job riêng, chạy tay:
+- `ds-prepare` (DE sở hữu, [08 §6](08_du_lieu_cho_ds.md)).
+- `ds-benchmark`, `ds-champion` (DS sở hữu, [ds/04 §5](../ds/04_thuc_nghiem_danh_gia.md)).
+
+Lý do: dữ liệu DS là bản cố định nên không cần train lại mỗi đêm, và lưới thực nghiệm chạy hàng giờ sẽ chặn pipeline DE trên 4 vCPU. Các job này chạy ngoài giờ batch, và lịch `instacart-stream-15m` phải tạm dừng trong lúc chạy.
+
 `warehouse_id` là biến DAB, lấy bằng lookup:
 
 ```yaml
@@ -217,6 +223,7 @@ FROM instacart.ops.reconciliation WHERE check_date = current_date();
 | 12 | Checkpoint stream hỏng | Pipeline stream lỗi đọc checkpoint | Đổi `eh_generation` (flow mới) rồi phát lại toàn bộ | Bronze giữ dữ liệu cũ; silver upsert theo khóa |
 | 13 | Đối soát không đạt | Task `reconcile` đỏ, `refresh_bi` bị bỏ | Điều tra theo `check_name`, sửa, Repair run | Dashboard vẫn giữ số của lần đạt trước |
 | 14 | Ghi sai bảng thường (`ops.*`, `off_crawl_state`) | Số liệu lạ | `DESCRIBE HISTORY` → `RESTORE TABLE … TO VERSION AS OF n` | Delta giữ version cũ (mặc định 7 ngày) |
+| 15 | Job `ds-prepare` lỗi giữa chừng | Task đỏ; `_manifest.json` chưa có | Repair run | Snapshot chặn ghi lần hai; index/transactions tính lại tất định; manifest ghi sau cùng ([08 §8](08_du_lieu_cho_ds.md)) |
 
 ## 7. Diễn tập lỗi (bằng chứng cho báo cáo)
 

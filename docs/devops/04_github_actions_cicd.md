@@ -80,7 +80,8 @@ repos:
 | Job | Bước | Công cụ |
 |---|---|---|
 | `terraform` | fmt -check · `init -backend=false` · validate cho từng stack · tflint (ruleset azurerm) · trivy config | `hashicorp/setup-terraform@v3`, `terraform-linters/setup-tflint`, `aquasecurity/trivy-action` |
-| `python` | `uv sync` · `ruff check` · `pytest -q` (pyspark local, dữ liệu nhỏ trong `tests/fixtures/`) | `astral-sh/setup-uv` |
+| `python` | `uv sync` · `ruff check` · `pytest -q` (pyspark local, dữ liệu nhỏ trong `tests/fixtures/`; gồm test thuật toán DS ở `tests/ml/`) | `astral-sh/setup-uv` |
+| `java` (chỉ khi PR đụng `src/mapreduce/**`) | `mvn -B verify`: build jar MapReduce và chạy test trên `MiniMRYarnCluster` ([ds/03 §4.3](../ds/03_hadoop_mapreduce_local.md)) | `actions/setup-java` (cache Maven) |
 | `bundle` | `databricks bundle validate -t dev` (chỉ kiểm tra cú pháp, không cần đăng nhập nếu không đọc biến từ workspace) | `databricks/setup-cli` |
 | `cost` (tùy chọn) | `infracost diff` → comment chi phí ước tính tăng/giảm | `infracost/actions/setup` (cần API key miễn phí lưu trong Secrets) |
 
@@ -91,8 +92,10 @@ permissions: { contents: read, pull-requests: write }
 jobs:
   terraform:
     runs-on: ubuntu-latest
-    strategy: { matrix: { stack: [bootstrap, stacks/10-core, stacks/20-stream, stacks/30-databricks, stacks/40-orchestration, stacks/90-sandbox] } }
-    defaults: { run: { working-directory: infra/${{ matrix.stack }} } }
+    strategy: { matrix: { stack: [bootstrap, stacks/10-core, stacks/20-stream, stacks/30-databricks, stacks/40-orchestration, stacks/50-serving, stacks/90-sandbox] } }
+    defaults:
+      run:
+        working-directory: infra/${{ matrix.stack }}
     steps:
       - uses: actions/checkout@v4
       - uses: hashicorp/setup-terraform@v3
@@ -110,7 +113,25 @@ jobs:
       - uses: actions/setup-java@v4          # pyspark cần JVM
         with: { distribution: temurin, java-version: "17" }
       - run: uv sync --frozen && uv run ruff check . && uv run pytest -q
+  java:                                     # job luôn chạy (để làm required check), bước nặng chỉ chạy khi đụng MapReduce
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changed
+        with:
+          filters: |
+            mr:
+              - 'src/mapreduce/**'
+      - if: steps.changed.outputs.mr == 'true'
+        uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "11", cache: maven }
+      - if: steps.changed.outputs.mr == 'true'
+        run: mvn -B -q verify
+        working-directory: src/mapreduce
 ```
+
+`pyspark.ml` (FP-Growth trong test DS) cần **numpy**. Phải thêm `numpy` vào nhóm `dev` của `pyproject.toml` cùng PR đầu tiên có `tests/ml/`; nếu không, job `python` báo `ModuleNotFoundError: numpy`.
 
 ### 3.2 `tf-plan.yml`: plan và comment lên PR
 
@@ -122,27 +143,35 @@ on:
   pull_request:
     paths: ["infra/**"]
 permissions: { id-token: write, contents: read, pull-requests: write }   # id-token cho OIDC
-concurrency: { group: tf-${{ github.head_ref }}, cancel-in-progress: true }
+concurrency:
+  group: tf-${{ github.head_ref }}
+  cancel-in-progress: true
 env:
   ARM_USE_OIDC: "true"
   ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
   ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
   ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_A }}
 jobs:
-  detect:            # dorny/paths-filter → danh sách stack bị đổi
-    ...
+  detect:            # dorny/paths-filter → output "stacks" = danh sách stack bị đổi (JSON)
+    runs-on: ubuntu-latest
   plan:
     needs: detect
-    strategy: { matrix: { stack: ${{ fromJson(needs.detect.outputs.stacks) }} } }
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack: ${{ fromJson(needs.detect.outputs.stacks) }}
     steps:
       - uses: actions/checkout@v4
       - uses: azure/login@v2
-        with: { client-id: ${{ vars.AZURE_CLIENT_ID }}, tenant-id: ${{ vars.AZURE_TENANT_ID }}, subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }} }
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_A }}
       - uses: hashicorp/setup-terraform@v3
       - run: terraform init -input=false -backend-config=../../backend.hcl
         working-directory: infra/stacks/${{ matrix.stack }}
       - run: terraform plan -input=false -no-color -lock-timeout=5m -var-file=../../envs/${{ matrix.stack }}.tfvars -out=tfplan
-      - # đăng plan lên PR (vd. actions/github-script, cắt bớt nếu > 60k ký tự)
+      # Bước cuối: đăng plan lên PR (vd. actions/github-script, cắt bớt nếu > 60k ký tự)
 ```
 
 Biến không bí mật (Object ID của thành viên, IP...) được đọc từ GitHub Variables rồi chuyển thành `TF_VAR_*`, vì CI không có file `*.auto.tfvars`.
@@ -207,8 +236,10 @@ on:
     - cron: "0 17 * * *"        # 00:00 giờ VN: luôn tắt
 jobs:
   toggle:
-    environment: prod
-    env: { ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_B }} }
+    runs-on: ubuntu-latest
+    environment: stream             # không có required reviewer, để lịch đêm tự chạy được (xem dưới)
+    env:
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_B }}
     steps:
       - ...login, init (key = stream.tfstate)
       - run: terraform ${{ (github.event.inputs.action || 'down') == 'up' && 'apply' || 'destroy' }} -auto-approve
@@ -228,6 +259,14 @@ Chỉ làm nếu spike 3.6 cho thấy tenant cho phép service principal gọi P
 3. Kích hoạt refresh.
 
 Nếu tenant không cho phép thì publish tay từ Power BI Desktop theo checklist ở tài liệu 06. Thư mục `powerbi/` (định dạng PBIP) vẫn được review qua PR.
+
+### 3.8 `func-deploy.yml` (tùy chọn, G5)
+
+Chỉ làm khi đã dựng stack `50-serving` ([03 §5.1](03_terraform_azure.md)).
+- **Kích hoạt:** push lên `main` có đụng `src/serving_func/**`.
+- **Các bước:** đăng nhập Azure bằng OIDC (cùng UAMI CI), rồi `Azure/functions-action@v1` deploy thư mục `src/serving_func/` lên `func-instacart-recommend`.
+- **Quyền:** UAMI CI cần role *Website Contributor* trên Function App. Role này được gán trong `50-serving`.
+- **Sau khi deploy:** gọi thử `POST /api/recommend` với giỏ `[24852]`, kỳ vọng mã 200. Function key lấy từ Key Vault lúc chạy, không lưu trong GitHub.
 
 ## 4. Secrets và Variables
 
