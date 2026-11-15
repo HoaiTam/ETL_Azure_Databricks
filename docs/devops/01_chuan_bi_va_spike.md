@@ -91,12 +91,17 @@ Tạo tay **một** workspace Premium ở region đã chốt (Portal, mất kho�
 | Serverless jobs / notebook | Chạy notebook với compute "Serverless" | Chạy được | Không sao; dùng job cluster single-node |
 | Cluster single-node DS3_v2 | Tạo cluster, Runtime 15.4 LTS | Khởi động trong khoảng 5 phút | Thử `Standard_D4ds_v5` / `Standard_F4s_v2` |
 | Thời hạn trial Premium (14 ngày, miễn DBU) | Xem banner trên workspace | Ghi lại ngày hết hạn | Lên kế hoạch DBU sau trial vào budget |
+| Pipeline Lakeflow edition **Advanced** chạy single-node | Tạo pipeline thử, `num_workers: 0`, 1 bảng Auto Loader + 1 `AUTO CDC` + 1 expectation | Update xong, trong quota 4 vCPU | Edition Pro (bỏ expectations, dùng bảng quarantine thủ công); hoặc serverless pipeline nếu có |
+| Serverless pipeline | Tạo pipeline với *Serverless* | Chạy được | Classic như trên; MV tính lại toàn bộ thay vì tăng dần |
+| Kafka (Event Hubs) trong LDP + đổi tên flow | `append_flow` đọc Kafka, sau đó đổi tên flow và chạy lại | Bảng giữ dữ liệu, flow mới đọc từ đầu | Giữ namespace cố định suốt giai đoạn demo ([de/04 §3.2](../de/04_streaming.md)) |
+| ForEachBatch sink của LDP | Sink POST tới một URL thử | Chạy được | Power BI DirectQuery + auto page refresh ([de/04 §4.5](../de/04_streaming.md)) |
 
 ### 3.5 Dịch vụ còn lại
 
 | Kiểm tra | Cách làm | Dự phòng |
 |---|---|---|
 | Azure SQL free offer (100k vCore-giây/tháng) | Portal → SQL Database → "Apply offer"; ghi lại region | Dùng Basic DTU (khoảng 5 USD/tháng) |
+| **CDC** bật được trên DB free offer | `EXEC sys.sp_cdc_enable_db` rồi `sp_cdc_enable_table`, sửa 1 dòng, đọc `cdc.fn_cdc_get_all_changes_…` | Watermark `updated_at` + soft delete ([de/01 §3.7](../de/01_ingest_landing.md)) |
 | Event Hubs Standard + Kafka endpoint | Tạo namespace Standard, dùng `kcat` gửi 1 message vào `:9093` | Basic không có Kafka → bắt buộc dùng Standard |
 | ADF có activity "Databricks Job" | ADF Studio → Activities → Databricks | Dùng activity Notebook để gọi notebook điều phối job |
 | ADF tải ZIP từ Zenodo qua HTTP | Copy activity: HTTP → ADLS, kiểm tra xem có dùng ZipDeflate được không | Tải về rồi giải nén trong Databricks (`unzip` trên driver) |
@@ -121,5 +126,7 @@ Tạo tay **một** workspace Premium ở region đã chốt (Portal, mất kho�
 | Unity Catalog | External location (mặc định) / managed storage | 3.4 |
 | Lớp serving cho Power BI | Serverless warehouse (mặc định) / gold → Azure SQL / `DeltaLake.Table` | 3.4, 3.6 |
 | Compute | Single-node DS3_v2 (mặc định) / máy khác cùng 4 vCPU | 3.2, 3.4 |
+| Pipeline DE | LDP Advanced classic single-node (mặc định) / LDP serverless / LDP Pro | 3.4 |
+| Nguồn SQL | CDC theo LSN (mặc định) / watermark `updated_at` + soft delete | 3.5 |
 
 Sau khi chốt: **xóa resource group spike** bằng lệnh `az group delete -n rg-spike` và xóa workspace thử, để Terraform dựng lại từ đầu.

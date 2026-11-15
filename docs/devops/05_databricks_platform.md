@@ -167,7 +167,7 @@ resource "databricks_volume" "checkpoints" {        # checkpoint của streaming
 
 | Đối tượng | DE (`de`) | DS (`ds`) | BI viewer (`bi`) | SP CI / job |
 |---|---|---|---|---|
-| catalog `instacart` | USE CATALOG | USE CATALOG | USE CATALOG | USE CATALOG, CREATE SCHEMA |
+| catalog `instacart` | USE CATALOG, CREATE SCHEMA (schema dev `<user>_*`, xem [de/02 §2.2](../de/02_bronze_ldp.md)) | USE CATALOG | USE CATALOG | USE CATALOG, CREATE SCHEMA |
 | `landing_meta`, `bronze` | ALL PRIVILEGES | — | — | ALL PRIVILEGES |
 | `silver` | ALL PRIVILEGES | SELECT | — | ALL PRIVILEGES |
 | `gold` | ALL PRIVILEGES | SELECT | **SELECT** | ALL PRIVILEGES |
@@ -233,6 +233,8 @@ resource "databricks_permissions" "policy_use" {
 ```
 
 Chặn tạo cluster tự do: tắt quyền *Unrestricted cluster creation* của nhóm `users` (`databricks_entitlements`), để mọi người buộc phải dùng policy.
+
+Pipeline Lakeflow (LDP) dùng cluster riêng nên cần thêm policy loại `dlt` (`instacart-pipeline-single-node`, `num_workers = 0`), code ở [de/02 §2.1](../de/02_bronze_ldp.md).
 
 > Instance pool chỉ có lợi khi chạy nhiều job ngắn liên tiếp. Với quota 4 vCPU, VM idle trong pool vẫn **chiếm quota**. Mặc định **không** dùng pool.
 
@@ -322,6 +324,8 @@ targets:
     permissions:
       - { level: CAN_VIEW, group_name: users }
 ```
+
+Pipeline LDP (`resources.pipelines`) khai báo ở [de/02 §2.2](../de/02_bronze_ldp.md) và [de/04 §3.1](../de/04_streaming.md); job đầy đủ ở [de/06 §2](../de/06_van_hanh_chay_lai.md). Khung dưới đây chỉ minh họa cách dùng `policy_id`.
 
 ```yaml
 # bundles/resources/jobs_batch.yml (khung; nội dung task ở tài liệu 06)

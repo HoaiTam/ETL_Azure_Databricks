@@ -13,7 +13,7 @@
 
 **Xong khi:** đạt checklist G3 (mục 6.3) và G4 (mục 6.4).
 
-> Tài liệu này chỉ nói phần **triển khai và vận hành** (đặt code ở đâu, deploy thế nào, nghiệm thu ra sao). Logic transform chi tiết thuộc tài liệu DE riêng.
+> Tài liệu này chỉ nói phần **triển khai và vận hành** (đặt code ở đâu, deploy thế nào, nghiệm thu ra sao). Logic transform chi tiết nằm ở bộ tài liệu DE [docs/de/](../de/00_tong_quan_de.md): CDC, Lakeflow Declarative Pipelines, streaming, chạy lại khi lỗi, dựng Power BI.
 
 ---
 
@@ -44,8 +44,8 @@
 
 | Pipeline | Làm gì | Lịch |
 |---|---|---|
-| `pl_ingest_instacart` | HTTP Zenodo → `landing/instacart/<bảng>/ingest_date=` (một lần, có thể chạy lại) | Chạy tay |
-| `pl_ingest_retail_db` | Lookup watermark `max(updated_at)` → Copy SQL → Parquet `landing/retail_db/` → cập nhật watermark | Hằng ngày |
+| `pl_ingest_instacart` | HTTP Zenodo → `_staging` → `landing/instacart/<bảng>/release=2017/` + `_SUCCESS` (một lần, chạy lại được) | Chạy tay |
+| `pl_ingest_retail_db` | **SQL CDC**: Lookup cửa sổ LSN → Copy `fn_cdc_get_all_changes` → Parquet `landing/retail_db/<bảng>/window=…/` → SP cập nhật watermark ([de/01 §3](../de/01_ingest_landing.md)) | Hằng ngày |
 | `pl_ingest_off` | Gọi job Databricks `off_crawler`. Giới hạn 10 request/phút nên crawler nằm trong Python, không dùng ADF ForEach | Hằng ngày, theo lô khoảng 300 sản phẩm |
 | `pl_master` | Execute pipeline retail → OFF → **Databricks Job** `instacart-batch-medallion` | Hằng ngày 02:00 |
 
@@ -55,23 +55,28 @@
 
 ### 2.1 Job batch `instacart-batch-medallion`
 
-`ingest_bronze → build_silver → build_gold → (train_rules → evaluate_register, thêm ở G5) → refresh_bi`
+Nhóm đã chọn **Lakeflow Declarative Pipelines** (LDP, edition Advanced) cho bronze → silver → gold. Job chỉ còn điều phối pipeline và các task phụ trợ:
 
-| Task | Nguồn → đích | Ghi chú triển khai |
+`pipeline_batch (LDP instacart_batch) → create_views → collect_dq ∥ reconcile → refresh_bi → (train_rules → evaluate_register, thêm ở G5)`
+
+| Task | Loại | Ghi chú triển khai |
 |---|---|---|
-| `seed_retail_db` (chạy một lần, job riêng) | Sinh `product_prices`, `promotions` có seed → Azure SQL | Đọc mật khẩu từ secret scope `kv` |
-| `ingest_bronze` | Volume `raw` → `bronze.*` (Auto Loader `availableNow`, directory listing) | Checkpoint đặt tại `/Volumes/instacart/ops/checkpoints/autoloader/<bảng>` |
-| `build_silver` | `bronze.*` → `silver.*` + `silver.quarantine` | DQ ghi vào `ops.dq_results` |
-| `build_gold` | `silver.*` → `gold.*` | OPTIMIZE / liquid clustering ở cuối task |
-| `refresh_bi` | Kích hoạt refresh semantic model qua REST (nếu được phép); nếu không thì bỏ qua | Xem mục 5 |
+| `seed_retail_db --wave N` (job riêng) | Python | Sinh dữ liệu và các đợt thay đổi cho CDC; đọc mật khẩu từ secret scope `kv` ([de/01 §3.4](../de/01_ingest_landing.md)) |
+| `off_crawler → off_images` (job riêng, ADF `pl_ingest_off` gọi) | Python | [de/01 §4](../de/01_ingest_landing.md) |
+| `pipeline_batch` | `pipeline_task` | Auto Loader → bronze, `AUTO CDC`/expectations → silver, MV → gold. LDP tự quản lý checkpoint ([de/02](../de/02_bronze_ldp.md), [de/03](../de/03_silver_cdc_scd_dq.md), [de/05](../de/05_gold_serving.md)) |
+| `create_views`, `collect_dq`, `reconcile` | `sql_task` trên serverless warehouse (không tốn quota) | [de/06 §2–4](../de/06_van_hanh_chay_lai.md) |
+| `refresh_bi` | Python | Chỉ chạy khi `reconcile` đạt ([de/07 §7](../de/07_power_bi.md)) |
 
-### 2.2 Job streaming `instacart-streaming`
+DAB đầy đủ của job ở [de/06 §2](../de/06_van_hanh_chay_lai.md); pipeline ở [de/02 §2](../de/02_bronze_ldp.md) và [de/04 §3.1](../de/04_streaming.md).
 
-`eventhubs_to_bronze → stream_to_silver → pair_counts_gold`
+### 2.2 Pipeline streaming `instacart_stream`
+
+LDP `instacart_stream`: Kafka → `bronze.order_events` → `silver.stream_orders` / `stream_order_items` (`AUTO CDC` theo `order_id`) → `gold.stream_kpi_1m`, `stream_pair_counts_10m`, `ops.streaming_latency`. Chi tiết ở [de/04](../de/04_streaming.md).
 
 **Ràng buộc quota:** chỉ có 4 vCPU, nên **không chạy cùng lúc** với job batch trên Sub A.
-- **Mặc định:** chạy streaming dạng `trigger(availableNow=True)` theo lịch mỗi 10–15 phút. Cách này vẫn là Structured Streaming với checkpoint và exactly-once qua MERGE, chỉ khác là không giữ cluster chạy liên tục.
-- **Lúc demo:** tạm dừng lịch batch, chạy `processingTime='30 seconds'` liên tục trong 30–60 phút để thấy dashboard cập nhật trực tiếp.
+- **Mặc định:** pipeline ở chế độ *triggered*, job `instacart-stream-15m` chạy mỗi 15 phút. Mỗi update đọc hết sự kiện mới rồi dừng (tương đương `availableNow`), vẫn có checkpoint và upsert theo khóa.
+- **Lúc demo:** tạm dừng lịch batch, deploy với `--var stream_continuous=true` để pipeline chạy liên tục trong 30–60 phút.
+- **Mỗi lần Event Hubs được tạo lại:** `stream-toggle up` truyền `--var eh_generation=g<yyyymmdd>` để LDP dùng flow (checkpoint) mới ([de/04 §3.2](../de/04_streaming.md)).
 - **Đo độ trễ (rubric 3.3):** bảng `ops.streaming_latency` gồm:
   - `event_ts` (simulator).
   - `enqueued_ts` (Event Hubs, region B).
@@ -87,13 +92,13 @@ Chạy ở máy local hoặc GitHub Codespace. Đọc `order_products__train` r�
 
 | # | Việc | Ai | Lệnh / workflow |
 |---|---|---|---|
-| 1 | Deploy bundle prod (tạo job) | P2 | merge PR → `de-deploy` |
-| 2 | Chạy `seed_retail_db` một lần | P2 | `databricks bundle run seed_retail_db -t prod` |
+| 1 | Deploy bundle prod (tạo pipeline + job) | P2 | merge PR → `de-deploy` |
+| 2 | Bật CDC trên Azure SQL, chạy `seed_retail_db --wave 0` | P2 | `src/ingest/sql/*.sql`; `databricks bundle run seed_retail_db -t prod` |
 | 3 | Apply `40-orchestration` (trigger ở trạng thái tắt) | P1 | merge PR → `tf-apply` |
 | 4 | Chạy `pl_ingest_instacart` một lần | P2 | ADF Studio → Trigger now |
 | 5 | Chạy `pl_master` → bronze/silver/gold | P2 | Trigger now; kiểm tra G3 |
 | 6 | Bật Event Hubs, chạy simulator khoảng 95% tập train | P3 | `stream-toggle up`, simulator |
-| 7 | Chạy job streaming tới silver/gold | P3 | `bundle run instacart-streaming` |
+| 7 | Chạy pipeline streaming tới silver/gold | P3 | `bundle run instacart_stream` |
 | 8 | Bật trigger hằng ngày | P1 | `triggers_on = true` qua PR |
 | 9 | Dựng Power BI (mục 5) | P4 | — |
 

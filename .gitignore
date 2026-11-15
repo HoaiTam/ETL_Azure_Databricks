@@ -36,7 +36,7 @@ powerbi/**/.pbi/localSettings.json
 powerbi/**/.pbi/cache.abf
 
 # --- Dữ liệu local ---
-data/
+/data/
 *.zip
 *.csv
 !tests/fixtures/**/*.csv

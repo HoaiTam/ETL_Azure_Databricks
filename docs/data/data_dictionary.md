@@ -12,7 +12,7 @@ Schema dạng DBML để dán vào [dbdiagram.io](https://dbdiagram.io) nằm �
 | Loại (theo yêu cầu Bài 08) | Nguồn                                                    | Bảng                                                                  | Định dạng                | Đường vào                                 |
 | -------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------ | ----------------------------- | ----------------------------------------------- |
 | Structured (file)              | Instacart 2017, tải từ Zenodo                           | `orders`, `order_products__prior`, `products`, `aisles`, `departments` | CSV                         | ADF Copy HTTP → `landing/instacart/`         |
-| Structured (CSDL)              | Azure SQL, dữ liệu **tự sinh** bằng Python (có seed) | `product_prices`, `promotions`                                         | Bảng SQL → Parquet        | ADF Copy tăng dần → `landing/retail_db/`   |
+| Structured (CSDL)              | Azure SQL, dữ liệu **tự sinh** bằng Python (có seed) | `product_prices`, `promotions`                                         | Bảng SQL → Parquet        | ADF Copy **CDC theo LSN** → `landing/retail_db/`   |
 | Semi-structured + Unstructured | Open Food Facts REST API                                  | `off_products` (JSON), `product_images` (ảnh .jpg)                    | JSON, JPG                   | Crawler theo lô → `landing/off_api/`        |
 | Streaming                      | Đơn `train` của Instacart, phát lại bằng simulator  | `order_events`                                                         | JSON qua Event Hubs (Kafka) | Structured Streaming → `bronze.order_events` |
 
@@ -155,8 +155,8 @@ aisle_id,aisle                department_id,department
 
 Mục đích chính là **đáp ứng yêu cầu Bài 08 về nguồn CSDL quan hệ**. Instacart chỉ có file CSV tĩnh, nên không thể hiện được kỹ năng ingest từ cơ sở dữ liệu. Hai bảng này giúp thể hiện:
 
-- **Copy tăng dần từ CSDL:** ADF dùng Lookup để lấy `max(updated_at)` của lần chạy trước, rồi Copy với điều kiện `WHERE updated_at > watermark`.
-- **Dữ liệu thay đổi theo thời gian:** giá đổi theo kỳ, nên có thể dựng SCD Type 2 trong silver.
+- **CDC từ CSDL:** bật Change Data Capture của SQL. ADF đọc nhật ký thay đổi (insert/update/delete) theo cửa sổ LSN, watermark lưu ở `etl.cdc_watermark` ([de/01 §3](../de/01_ingest_landing.md)). Dự phòng nếu không bật được CDC: watermark `updated_at` + soft delete.
+- **Dữ liệu thay đổi theo thời gian:** nguồn chỉ giữ giá **hiện hành**; lịch sử giá được dựng ở silver bằng SCD Type 2 từ luồng CDC.
 - **Join theo khoảng thời gian hiệu lực:** đơn hàng phải khớp với giá và khuyến mãi đang có hiệu lực tại thời điểm đặt (`order_ts_sim`).
 
 Insight là lợi ích phụ: doanh thu giả lập theo ngành hàng, và câu hỏi "món đang khuyến mãi có hay được mua kèm không". Phần DS (FP-Growth, DApriori) **không phụ thuộc** vào hai bảng này.
@@ -167,27 +167,31 @@ Insight là lợi ích phụ: doanh thu giả lập theo ngành hàng, và câu 
 
 - Script Python cố định seed, để 4 thành viên sinh ra cùng một bộ dữ liệu.
 - Giá gốc lấy theo phân phối riêng của từng department (ví dụ `produce` rẻ, `alcohol` đắt).
-- Mỗi sản phẩm có 1–4 lần đổi giá trong khoảng thời gian giả lập.
+- Chạy theo **đợt** (`--wave`): đợt 0 insert toàn bộ (giá có hiệu lực từ `2015-01-01`); đợt 1–4 đổi giá khoảng 5% sản phẩm, thêm/gia hạn/**xóa** khuyến mãi, với `updated_at` = 01/03, 08/03, 15/03, 22/03/2026.
 - Khuyến mãi áp cho khoảng 5–10% sản phẩm, mỗi đợt kéo dài 3–14 ngày.
 
-### 3.1 `product_prices`: lịch sử giá
+### 3.1 `product_prices`: giá hiện hành (nguồn của CDC)
+
+Bảng kiểu hệ thống bán hàng: **mỗi sản phẩm một dòng**, đổi giá là `UPDATE`. Lịch sử giá **không** lưu ở nguồn mà dựng ở `silver.product_prices_history` (SCD Type 2, cột `__START_AT` / `__END_AT`) từ luồng CDC ([de/03 §2](../de/03_silver_cdc_scd_dq.md)).
 
 
 | Cột         | Kiểu                 | Ý nghĩa                                                            |
 | -------------- | ----------------------- | ---------------------------------------------------------------------- |
-| `price_id`   | int, PK               | Khóa kỹ thuật                                                     |
-| `product_id` | int, FK → `products` | Sản phẩm                                                           |
-| `unit_price` | decimal(10,2)         | Giá bán (USD)                                                      |
+| `product_id` | int, PK, FK → `products` | Sản phẩm                                                           |
+| `unit_price` | decimal(10,2)         | Giá bán hiện hành (USD)                                         |
 | `currency`   | char(3)               | Đơn vị tiền tệ, mặc định `USD`                               |
-| `valid_from` | date                  | Ngày giá bắt đầu có hiệu lực (lịch giả lập)               |
-| `valid_to`   | date                  | Ngày giá hết hiệu lực. `9999-12-31` nghĩa là giá hiện hành |
-| `updated_at` | datetime              | Thời điểm sửa dòng. **ADF dùng cột này làm watermark**      |
+| `updated_at` | datetime2             | Thời điểm đổi giá theo lịch giả lập. Silver dùng làm `SEQUENCE BY` → khoảng hiệu lực |
 
 ```
-price_id,product_id,unit_price,currency,valid_from,valid_to,updated_at
-1,24852,0.29,USD,2026-01-01,2026-02-14,2026-01-01 00:00:00
-2,24852,0.25,USD,2026-02-15,9999-12-31,2026-02-15 00:00:00
-3,1,3.49,USD,2026-01-01,9999-12-31,2026-01-01 00:00:00
+-- Bảng nguồn sau đợt 3 (một dòng)
+product_id,unit_price,currency,updated_at
+24852,0.27,USD,2026-03-15 00:00:00
+
+-- silver.product_prices_history (dựng từ CDC)
+product_id,unit_price,__START_AT,__END_AT
+24852,0.29,2015-01-01,2026-03-01
+24852,0.25,2026-03-01,2026-03-15
+24852,0.27,2026-03-15,NULL
 ```
 
 ### 3.2 `promotions`: chương trình khuyến mãi
@@ -201,7 +205,7 @@ price_id,product_id,unit_price,currency,valid_from,valid_to,updated_at
 | `discount_pct` | int                   | % giảm (với `percent_off`)           |
 | `start_date`   | date                  | Ngày bắt đầu                       |
 | `end_date`     | date                  | Ngày kết thúc                       |
-| `updated_at`   | datetime              | Watermark cho ADF                      |
+| `updated_at`   | datetime              | Thời điểm sửa; CDC xếp thứ tự theo LSN, không theo cột này |
 
 ```
 promo_id,product_id,promo_type,discount_pct,start_date,end_date,updated_at
@@ -228,6 +232,7 @@ Mỗi đơn là một sự kiện, gồm header từ `orders` và mảng `items`
 | `order_id` … `days_since_prior_order` | Gốc (`orders`)                | Như mục 2.1                                                                          |
 | `event_time`                           | Tạo                           | Thời điểm giả lập (= `order_ts_sim`), dùng cho watermark và cửa sổ thời gian |
 | `replay_run_id`                        | Tạo                           | Mã lần phát lại, để phân biệt các lần demo                                   |
+| `produced_at`, `producer_location`     | Tạo                           | Đồng hồ thật lúc gửi và nơi chạy simulator; dùng đo độ trễ ([de/04 §4.4](../de/04_streaming.md)) |
 | `items[]`                              | Gốc (`order_products__train`) | `product_id`, `add_to_cart_order`, `reordered`                                         |
 
 ```json
@@ -379,9 +384,10 @@ Tỉ lệ khớp thực tế **chưa đo**, cần làm trong giai đoạn spike.
 
 | Bảng                      | Hình thành từ                                                    | Vai trò                                                                    |
 | ---------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `silver.orders`            | `orders` (prior/test từ batch) + header từ `order_events` (train) | Header đơn chuẩn hóa, thêm `source` và `order_ts_sim`                 |
-| `silver.order_items`       | `order_products__prior` + `items` từ `order_events`                | Các món trong đơn, thêm `source`                                       |
+| `silver.orders`            | **View**: `orders_batch` (prior/test) ∪ `stream_orders` (train) | Header đơn chuẩn hóa, thêm `source` và `order_ts_sim`                 |
+| `silver.order_items`       | **View**: `order_items_prior` ∪ `stream_order_items`                | Các món trong đơn, thêm `source`                                       |
+| `silver.product_prices_history` | CDC của `product_prices` (`AUTO CDC`, SCD2)                | Lịch sử giá, dùng cho join theo thời điểm                         |
 | `silver.product_off_match` | Kết quả chấm điểm ghép tên                                   | Bảng cầu nối Instacart ↔ OFF                                            |
 | `silver.dim_product`       | `products` + `aisles` + `departments` + giá + khuyến mãi + OFF   | Danh mục sản phẩm đã làm giàu                                        |
 | `silver.baskets`           | `order_items` gom theo đơn                                        | Đầu vào phần DS: `split = prior` để train, `holdout` để đánh giá |
-| `silver.quarantine`        | Bản ghi vi phạm luật chất lượng dữ liệu                     | Lưu lỗi kèm lý do, không xóa im lặng                                 |
+| `silver.quarantine_*`      | Bản ghi vi phạm luật chất lượng dữ liệu (mỗi nguồn một bảng) | Lưu lỗi kèm lý do (`_dq_failed`), không xóa im lặng                  |
