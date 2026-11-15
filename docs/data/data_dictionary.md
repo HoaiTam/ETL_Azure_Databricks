@@ -329,35 +329,9 @@ Một kết quả thật khi tìm "Chocolate Sandwich Cookies" (`product_id = 1`
 
 Instacart và OFF **không có khóa chung**, vì Instacart không có mã vạch. Vì vậy phải ghép theo tên và lưu kết quả vào bảng cầu nối `silver.product_off_match`.
 
-```mermaid
-flowchart TD
-    P["products<br/>product_id · product_name"]
-    S["OFF search API<br/>q = product_name → top 5 kết quả"]
-    SC{"Chấm điểm<br/>lọc en:united-states<br/>rapidfuzz token_set_ratio"}
-    M["silver.product_off_match<br/>product_id · off_code<br/>match_score · match_status"]
-    OFF["off_products<br/>code · brands · nutriscore · nova · nutriments"]
-    IMG["product_images<br/>off_code · path"]
-    A["aisles"]
-    D["departments"]
-    PR["product_prices<br/>giá hiện hành"]
-    PM["promotions<br/>KM đang chạy"]
-    DIM[("silver.dim_product")]
+![Ghép tên Instacart ↔ OFF và dựng silver.dim_product](product_enrichment_join.png)
 
-    P -- "product_name" --> S
-    S --> SC
-    SC -- "≥ 85: matched" --> M
-    SC -- "70–84: low_confidence" --> M
-    SC -- "< 70: no_match" --> M
-
-    P -- "product_id" --> DIM
-    A -- "aisle_id" --> DIM
-    D -- "department_id" --> DIM
-    PR -- "product_id, valid_to = 9999-12-31" --> DIM
-    PM -- "product_id, ngày nằm trong KM" --> DIM
-    M -- "product_id" --> DIM
-    OFF -- "code = off_code<br/>chỉ khi matched" --> DIM
-    IMG -- "off_code" --> DIM
-```
+File gốc để sửa: [product_enrichment_join.drawio](product_enrichment_join.drawio) (mở bằng app draw.io hoặc app.diagrams.net).
 
 **Quy trình chấm điểm:**
 
