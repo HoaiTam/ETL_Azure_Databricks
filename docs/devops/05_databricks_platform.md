@@ -1,0 +1,351 @@
+# 05 · Nền tảng Databricks: stack `30-databricks` + Databricks Asset Bundles (giai đoạn P4 → cổng G1)
+
+**Đầu vào:** `10-core` đã apply (workspace, Access Connector, ADLS, Key Vault); kết quả spike 3.4 (UC có tự gán metastore không, có quyền tạo storage credential không, serverless có dùng được không).
+**Đầu ra:**
+- Unity Catalog đã có catalog `instacart` và đủ schema theo tầng.
+- Quyền đã cấp theo vai trò.
+- Có cluster policy tiết kiệm, secret scope và SQL warehouse.
+- Có khung `bundles/` để DE deploy job.
+
+**Xong khi:** đạt checklist ở mục 9. Đạt được thì mở **cổng G1: DE bắt đầu trên cloud**.
+
+---
+
+## 1. Ranh giới: Terraform làm gì, DAB làm gì
+
+| Thuộc về **Terraform `30-databricks`** (nền, ít đổi, cần quyền admin) | Thuộc về **DAB `bundles/`** (việc, đổi hằng ngày, do DE/DS sở hữu) |
+|---|---|
+| Storage credential, external location, volume | Job batch, job streaming, task, dependencies |
+| Catalog, schema, grants | Notebook, file `.py`, wheel |
+| Nhóm / service principal, quyền workspace | Tham số job theo môi trường (dev/prod) |
+| Cluster policy, instance pool | Job cluster (tham chiếu policy theo tên) |
+| Secret scope | Lakeflow Declarative Pipeline (nếu dùng) |
+| SQL warehouse | Dashboard vận hành AI/BI (tùy chọn) |
+
+Lý do tách: khi DE sửa một transform, họ không cần quyền admin và không phải đi qua `terraform apply`. Ngược lại, khi DAB deploy nhầm thì cũng không xóa được catalog hay quyền.
+
+## 2. Provider và xác thực
+
+```hcl
+terraform {
+  required_providers {
+    databricks = { source = "databricks/databricks", version = "~> 1.60" }  # kiểm tra lại bản mới nhất
+    azurerm    = { source = "hashicorp/azurerm",     version = "~> 4.0" }
+  }
+  backend "azurerm" { key = "databricks.tfstate" }
+}
+
+locals { core = data.terraform_remote_state.core.outputs }
+
+provider "databricks" {
+  host                        = local.core.databricks_workspace_url
+  azure_workspace_resource_id = local.core.databricks_workspace_id
+  auth_type                   = "azure-cli"     # local: az login của P1; CI: phiên của azure/login (UAMI)
+}
+```
+
+> **Account-level** (`accounts.azuredatabricks.net`) chỉ cần đến nếu phải tự tạo/gán metastore hoặc tạo *account group*. Cả hai việc đều cần **account admin**, mà sinh viên thường không có. Thiết kế dưới đây vì vậy chạy hoàn toàn ở **workspace-level**, và đi nhánh dự phòng khi không có quyền.
+
+## 3. Các bước trong stack (làm tuần tự)
+
+### Bước 1 · Xác nhận metastore
+
+**Vì sao:** mọi thứ bên dưới (catalog, grants, external location) đều nằm trong metastore Unity Catalog. Workspace mới trên Azure thường được **tự gán** metastore của region.
+
+```hcl
+data "databricks_current_metastore" "this" {}
+output "metastore_id" { value = data.databricks_current_metastore.this.id }
+```
+
+Nếu data source này lỗi (không có metastore), dừng lại và xử lý theo nhánh dự phòng của spike 3.4.
+
+### Bước 2 · Danh tính: service principal cho CI và các thành viên
+
+**Vì sao:**
+- UAMI của GitHub Actions phải "là ai đó" trong workspace thì mới deploy bundle được.
+- Job prod chạy bằng service principal (`run_as`), không chạy bằng tài khoản cá nhân. Nhờ vậy job không hỏng khi một thành viên rời nhóm.
+
+```hcl
+resource "databricks_service_principal" "ci" {
+  application_id = var.ci_uami_client_id      # client id của id-github-ci
+  display_name   = "sp-github-ci"
+}
+```
+
+**Nhóm:** Unity Catalog chỉ nhận **account group**. Group tạo ở workspace-level (workspace-local) **không** dùng được trong lệnh GRANT. Có ba phương án, chọn theo kết quả spike:
+
+| Trường hợp | Cách làm |
+|---|---|
+| Có account admin | Provider `databricks.account` tạo `de_team`, `ds_team`, `bi_readers` và gán vào workspace |
+| Workspace bật *automatic identity management* (nhóm Entra tự đồng bộ) | Tạo 3 nhóm Entra (nếu tenant cho phép), rồi tham chiếu theo tên |
+| Không có hai điều trên (**mặc định an toàn**) | GRANT trực tiếp cho **từng user** (email trường) bằng `for_each` trên một map vai trò → danh sách người |
+
+```hcl
+variable "roles" {          # khai báo trong *.auto.tfvars / GitHub Variable, không commit email
+  type = map(list(string))  # { de = ["p1@…","p2@…","p3@…"], ds = ["p4@…","p1@…"], bi = ["p4@…", "<giảng viên>@…"] }
+}
+resource "databricks_user" "members" {
+  for_each  = toset(flatten(values(var.roles)))
+  user_name = each.value
+}
+```
+
+### Bước 3 · Storage credential và external location
+
+**Vì sao:** để UC đọc/ghi ADLS bằng **Access Connector** (managed identity), không dùng key. Mỗi container một external location, nên có thể cấp quyền đọc/ghi file khác nhau cho từng tầng.
+
+```hcl
+resource "databricks_storage_credential" "lake" {
+  name = "cred-instacart-lake"
+  azure_managed_identity { access_connector_id = local.core.access_connector_id }
+}
+
+resource "databricks_external_location" "layer" {
+  for_each        = toset(["landing", "bronze", "silver", "gold", "checkpoints", "mlflow"])
+  name            = "el-${each.key}"
+  url             = "abfss://${each.key}@${local.core.lake_account_name}.dfs.core.windows.net/"
+  credential_name = databricks_storage_credential.lake.name
+}
+```
+
+**Nhánh dự phòng (không có quyền `CREATE STORAGE CREDENTIAL`):**
+- Bỏ bước 3.
+- Dùng catalog mặc định của workspace (managed storage do Databricks quản lý) và tạo các schema bên trong catalog đó.
+- ADF vẫn ghi `landing/` trên ADLS. Auto Loader đọc `landing` bằng cấu hình Spark dùng managed identity của Access Connector, **hoặc** ADF ghi thẳng vào UC Volume qua REST.
+- Ghi rõ lựa chọn này trong báo cáo.
+
+### Bước 4 · Catalog, schema, volume
+
+**Vì sao:**
+- Catalog `instacart` gom toàn bộ dự án.
+- Mỗi tầng medallion là một schema, mỗi schema có `storage_root` riêng trỏ vào container tương ứng. Nhờ vậy trên ADLS dữ liệu bronze/silver/gold nằm tách bạch, và có thể đo dung lượng từng tầng (rubric 3.4).
+
+```hcl
+resource "databricks_catalog" "instacart" {
+  name         = "instacart"
+  storage_root = databricks_external_location.layer["bronze"].url   # mặc định; schema ghi đè bên dưới
+  comment      = "Instacart Market Basket + Open Food Facts + retail_db"
+}
+
+locals {
+  schemas = {
+    landing_meta      = "landing"      # volume chứa file thô, bảng off_crawl_state
+    bronze            = "bronze"
+    silver            = "silver"
+    gold              = "gold"
+    ml                = "mlflow"       # model registry, bảng kết quả train (G5)
+    instacart_sandbox = "silver"       # dữ liệu tổng hợp để thử tải (is_synthetic)
+    ops               = "gold"         # benchmark_results, streaming_latency, dq_results
+  }
+}
+resource "databricks_schema" "s" {
+  for_each     = local.schemas
+  catalog_name = databricks_catalog.instacart.name
+  name         = each.key
+  storage_root = "${databricks_external_location.layer[each.value].url}${each.key}"
+}
+
+resource "databricks_volume" "raw" {               # Auto Loader đọc /Volumes/instacart/landing_meta/raw/...
+  name             = "raw"
+  catalog_name     = databricks_catalog.instacart.name
+  schema_name      = databricks_schema.s["landing_meta"].name
+  volume_type      = "EXTERNAL"
+  storage_location = databricks_external_location.layer["landing"].url
+}
+resource "databricks_volume" "checkpoints" {        # checkpoint của streaming
+  name             = "checkpoints"
+  catalog_name     = databricks_catalog.instacart.name
+  schema_name      = databricks_schema.s["ops"].name
+  volume_type      = "EXTERNAL"
+  storage_location = databricks_external_location.layer["checkpoints"].url
+}
+```
+
+### Bước 5 · Phân quyền Unity Catalog (đặc quyền tối thiểu)
+
+**Vì sao:** rubric yêu cầu "ràng buộc từng nhóm người chỉ được xem một vài loại dữ liệu nhất định". Phần này là lớp kiểm soát **ở tầng dữ liệu**. Lớp RLS trong Power BI là **ở tầng báo cáo** (tài liệu 06).
+
+| Đối tượng | DE (`de`) | DS (`ds`) | BI viewer (`bi`) | SP CI / job |
+|---|---|---|---|---|
+| catalog `instacart` | USE CATALOG | USE CATALOG | USE CATALOG | USE CATALOG, CREATE SCHEMA |
+| `landing_meta`, `bronze` | ALL PRIVILEGES | — | — | ALL PRIVILEGES |
+| `silver` | ALL PRIVILEGES | SELECT | — | ALL PRIVILEGES |
+| `gold` | ALL PRIVILEGES | SELECT | **SELECT** | ALL PRIVILEGES |
+| `ml` | SELECT | ALL PRIVILEGES | — | ALL PRIVILEGES |
+| `ops` | ALL PRIVILEGES | SELECT | SELECT (bảng vận hành) | ALL PRIVILEGES |
+| `instacart_sandbox` | ALL | ALL | — | — |
+| volume `raw`, `checkpoints` | READ/WRITE VOLUME | — | — | READ/WRITE VOLUME |
+
+```hcl
+resource "databricks_grants" "gold" {
+  schema = "${databricks_catalog.instacart.name}.gold"
+  dynamic "grant" {
+    for_each = toset(var.roles.bi)
+    content {
+      principal  = grant.value
+      privileges = ["USE_SCHEMA", "SELECT"]
+    }
+  }
+  grant {
+    principal  = databricks_service_principal.ci.application_id
+    privileges = ["ALL_PRIVILEGES"]
+  }
+  # ... de, ds
+}
+```
+
+> `databricks_grants` là **có thẩm quyền tuyệt đối**: nó ghi đè mọi grant không khai báo. Vì vậy mọi quyền trên một securable phải nằm trong **một** khối duy nhất.
+
+**Bảo mật mức dòng ngay trong UC (tùy chọn, bổ trợ cho Power BI):** có thể đặt row filter trên `gold.department_sales` theo nhóm, ví dụ hàm `is_account_group_member('bi_produce')` chỉ cho xem department `produce`. Hàm SQL được tạo bằng job DE (DAB), vì hàm là "việc" chứ không phải "nền". Terraform chỉ cấp quyền `EXECUTE`.
+
+### Bước 6 · Cluster policy (+ instance pool)
+
+**Vì sao:**
+- Quota chỉ khoảng 4 vCPU, nên phải **cưỡng chế** cluster single-node và tự tắt. Không tin vào việc mọi người tự nhớ.
+- Policy cố định cấu hình máy và runtime, nên benchmark đọc/ghi (rubric 3.1) lặp lại được.
+- Tag `owner` bắt buộc trên cluster giúp chi phí DBU và VM tách được theo người.
+
+```hcl
+resource "databricks_cluster_policy" "single_node" {
+  name = "instacart-single-node"
+  definition = jsonencode({
+    "spark_version"           = { type = "fixed", value = "15.4.x-scala2.12" }   # LTS, chốt ở spike
+    "node_type_id"            = { type = "fixed", value = "Standard_DS3_v2" }
+    "num_workers"             = { type = "fixed", value = 0 }
+    "spark_conf.spark.databricks.cluster.profile" = { type = "fixed", value = "singleNode" }
+    "spark_conf.spark.master"                     = { type = "fixed", value = "local[*]" }
+    "custom_tags.ResourceClass"                   = { type = "fixed", value = "SingleNode" }
+    "autotermination_minutes" = { type = "range", maxValue = 20, defaultValue = 15 }
+    "custom_tags.owner"       = { type = "unlimited", isOptional = false }
+    "data_security_mode"      = { type = "fixed", value = "SINGLE_USER" }        # bắt buộc với UC
+  })
+}
+resource "databricks_permissions" "policy_use" {
+  cluster_policy_id = databricks_cluster_policy.single_node.id
+  dynamic "access_control" {
+    for_each = toset(flatten(values(var.roles)))
+    content {
+      user_name        = access_control.value
+      permission_level = "CAN_USE"
+    }
+  }
+}
+```
+
+Chặn tạo cluster tự do: tắt quyền *Unrestricted cluster creation* của nhóm `users` (`databricks_entitlements`), để mọi người buộc phải dùng policy.
+
+> Instance pool chỉ có lợi khi chạy nhiều job ngắn liên tiếp. Với quota 4 vCPU, VM idle trong pool vẫn **chiếm quota**. Mặc định **không** dùng pool.
+
+### Bước 7 · Secret scope dựa trên Key Vault
+
+**Vì sao:** notebook đọc `dbutils.secrets.get("kv", "eh-listen-connection-string")`. Bí mật nằm ở Key Vault, có thể xoay vòng mà không sửa code, và Databricks tự che giá trị trong log.
+
+```hcl
+resource "databricks_secret_scope" "kv" {
+  name = "kv"
+  keyvault_metadata {
+    resource_id = local.core.key_vault_id
+    dns_name    = local.core.key_vault_uri
+  }
+}
+resource "databricks_secret_acl" "kv_read" {        # nếu không cấp, chỉ người tạo đọc được
+  for_each   = toset(concat(var.roles.de, var.roles.ds, [databricks_service_principal.ci.application_id]))
+  scope      = databricks_secret_scope.kv.name
+  principal  = each.value
+  permission = "READ"
+}
+```
+
+> **Lưu ý đã biết:** API tạo secret scope **dựa trên Key Vault** yêu cầu token Entra của **người dùng**; service principal và managed identity không gọi được. Vì vậy resource này do **P1 apply từ máy local** (auth `azure-cli` bằng tài khoản người). Trong CI thì thêm `lifecycle { ignore_changes = all }` hoặc tách resource ra một thư mục riêng. Ngoài ra, Key Vault phải cấp role **Key Vault Secrets User** cho ứng dụng *AzureDatabricks* (application ID cố định `2ff814a6-3304-4ab8-85cb-cd0e6f879c1d`) thì Databricks mới đọc được bí mật.
+
+### Bước 8 · SQL warehouse (lớp phục vụ Power BI)
+
+**Vì sao:** Power BI cần một endpoint SQL ổn định (host + HTTP path) để DirectQuery hoặc import từ `gold`. **Serverless** khởi động trong vài giây, tự tắt và **không tính vào quota vCPU** của subscription. Warehouse classic/pro thì chạy VM trong Sub A, cỡ nhỏ nhất đã vượt 4 vCPU.
+
+```hcl
+resource "databricks_sql_endpoint" "bi" {
+  name                      = "wh-instacart-bi"
+  cluster_size              = "2X-Small"
+  min_num_clusters          = 1
+  max_num_clusters          = 1
+  auto_stop_mins            = 10
+  enable_serverless_compute = true
+  warehouse_type            = "PRO"
+  tags {
+    custom_tags {
+      key   = "owner"
+      value = "p4"
+    }
+  }
+}
+resource "databricks_permissions" "wh_use" {
+  sql_endpoint_id = databricks_sql_endpoint.bi.id
+  # CAN_USE: bi + de + ds; CAN_MANAGE: P1
+}
+output "warehouse_http_path" { value = databricks_sql_endpoint.bi.odbc_params[0].path }
+```
+
+Nếu serverless **không** dùng được thì bỏ resource này và dùng lớp serving dự phòng (tài liệu 06, mục 4).
+
+### Bước 9 · Output cho DAB và Power BI
+
+```hcl
+output "catalog"              { value = databricks_catalog.instacart.name }
+output "cluster_policy_id"    { value = databricks_cluster_policy.single_node.id }
+output "ci_sp_application_id" { value = databricks_service_principal.ci.application_id }
+output "warehouse_id"         { value = databricks_sql_endpoint.bi.id }
+```
+
+## 4. Khung Databricks Asset Bundles (`bundles/`)
+
+**Vì sao cần khung ngay ở G1:** DE bắt đầu viết job từ G1. Khung bundle chuẩn bảo đảm mọi job dùng đúng policy, đúng catalog, và có target dev/prod tách biệt ngay từ đầu.
+
+```yaml
+# bundles/databricks.yml
+bundle: { name: instacart }
+include: [resources/*.yml]
+
+variables:
+  catalog:   { default: instacart }
+  policy_id: { lookup: { cluster_policy: instacart-single-node } }   # lấy theo tên, không hardcode ID
+
+targets:
+  dev:
+    mode: development                 # tiền tố [dev <user>], tạm dừng schedule
+    default: true
+    workspace: { host: https://<workspace_url> }
+    variables: { catalog: instacart }   # có thể đổi sang schema dev_<user> nếu muốn tách dữ liệu
+  prod:
+    mode: production
+    workspace: { host: https://<workspace_url>, root_path: /Workspace/Shared/.bundle/instacart/prod }
+    run_as: { service_principal_name: <ci_sp_application_id> }
+    permissions:
+      - { level: CAN_VIEW, group_name: users }
+```
+
+```yaml
+# bundles/resources/jobs_batch.yml (khung; nội dung task ở tài liệu 06)
+resources:
+  jobs:
+    batch_medallion:
+      name: instacart-batch-medallion
+      job_clusters:
+        - job_cluster_key: sn
+          new_cluster: { policy_id: ${var.policy_id}, apply_policy_default_values: true, custom_tags: { owner: p2 } }
+      tasks:
+        - { task_key: ingest_bronze, job_cluster_key: sn, spark_python_task: { python_file: ../src/batch/ingest_bronze.py, parameters: ["--catalog", "${var.catalog}"] } }
+        - { task_key: build_silver,  depends_on: [{ task_key: ingest_bronze }], ... }
+        - { task_key: build_gold,    depends_on: [{ task_key: build_silver }],  ... }
+```
+
+## 5. Checklist (cổng G1)
+
+- [ ] `terraform plan` của `30-databricks` báo *No changes* sau khi apply.
+- [ ] `SHOW SCHEMAS IN instacart` liệt kê đủ 7 schema; `DESCRIBE EXTERNAL LOCATION el-bronze` trả về đúng URL.
+- [ ] P2 (vai `de`) tạo được bảng trong `bronze`. P4 (vai `bi`) **không** đọc được `bronze` (lỗi PERMISSION_DENIED) nhưng đọc được `gold`.
+- [ ] Không chọn được cấu hình cluster nào ngoài policy single-node; cluster tự tắt sau 20 phút.
+- [ ] `dbutils.secrets.get("kv","sql-admin-password")` trả về `[REDACTED]` trong notebook.
+- [ ] `SELECT 1` chạy được trên `wh-instacart-bi` (hoặc đã chốt lớp serving dự phòng).
+- [ ] `databricks bundle deploy -t dev` từ máy P2 tạo được job `[dev p2] instacart-batch-medallion`.
+
+Đạt hết các mục trên thì **mở G1**: P2 chạy ADF → landing → bronze trên cloud, P3 chuẩn bị streaming (cần thêm G2 = `20-stream` + secret `eh-*`).

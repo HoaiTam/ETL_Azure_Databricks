@@ -1,0 +1,516 @@
+# 03 · Dựng hạ tầng Azure bằng Terraform (giai đoạn P2 và P5)
+
+**Đầu vào:** bootstrap đã xong ([02](02_bootstrap_tfstate.md)); kết quả spike ([01](01_chuan_bi_va_spike.md)).
+**Đầu ra:** stack `10-core` (Sub A), `20-stream` (Sub B), `90-sandbox` (Sub C/D) đã apply. Các output (URL workspace, tên storage, ID Key Vault) được những stack sau đọc.
+**Xong khi:** đạt checklist ở cuối mỗi stack. Từ thời điểm đó mọi thay đổi chỉ đi qua PR ([04](04_github_actions_cicd.md)).
+
+> Ở giai đoạn đầu, P1 chạy `plan/apply` của `10-core` từ máy local để gỡ lỗi nhanh. Khi CI xong (P3 của tài liệu 00), apply chuyển hẳn sang GitHub Actions.
+
+---
+
+## 1. Bố cục code
+
+![Bố cục Terraform: stack, subscription, state](diagrams/02_bo_cuc_terraform.png)
+
+<sub>File gốc: [diagrams/devops_diagrams.drawio](diagrams/devops_diagrams.drawio), trang 2.</sub>
+
+```
+infra/
+  backend.hcl
+  modules/
+    naming_tags/        # tên + tag chuẩn, dùng ở mọi stack
+    lakehouse_storage/  # wrapper AVM storage: ADLS HNS + container + lifecycle
+    dbx_workspace/      # wrapper AVM databricks + access connector (dùng lại cho sandbox)
+  stacks/
+    10-core/            # Sub A — nền tảng chính
+    20-stream/          # Sub B — Event Hubs (bật/tắt theo buổi)
+    30-databricks/      # bên trong workspace (tài liệu 05)
+    40-orchestration/   # ADF linked service, dataset, pipeline, trigger (tài liệu 06)
+    90-sandbox/         # Sub C/D — workspace #2 cho DS
+  envs/
+    core.tfvars  stream.tfvars  sandbox-p4.tfvars
+```
+
+**Vì sao tách stack (mỗi stack một state):**
+
+| Lý do | Ví dụ |
+|---|---|
+| Khác subscription / khác người giữ quyền | `20-stream` nằm ở Sub B do P3 giữ |
+| Khác vòng đời | `20-stream` được `destroy` mỗi đêm; `10-core` gần như không đổi |
+| Khác provider, phụ thuộc thứ tự | Provider `databricks` cần `workspace_url`, mà URL này chỉ có sau khi `10-core` apply |
+| Giảm phạm vi rủi ro | Lỗi khi sửa pipeline ADF (`40`) không làm `plan` đụng tới workspace (`10`) |
+
+**Cách các stack nói chuyện với nhau:** stack sau đọc output của stack trước qua `terraform_remote_state`.
+
+```hcl
+data "terraform_remote_state" "core" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = "rg-tfstate"
+    storage_account_name = var.tfstate_account
+    container_name       = "tfstate"
+    key                  = "core.tfstate"
+    use_azuread_auth     = true
+  }
+}
+# dùng: data.terraform_remote_state.core.outputs.key_vault_id
+```
+
+**Module lấy từ Terraform Registry:** ưu tiên **Azure Verified Modules (AVM)**, là module chính thức do Microsoft duy trì.
+
+| Module | Dùng cho | Ghi chú |
+|---|---|---|
+| `Azure/naming/azurerm` | Sinh tên theo quy ước CAF (`st…`, `kv-…`, `dbw-…`) | Bọc trong `modules/naming_tags` |
+| `Azure/avm-res-storage-storageaccount/azurerm` | ADLS Gen2 (HNS) + container + role | |
+| `Azure/avm-res-keyvault-vault/azurerm` | Key Vault RBAC mode | |
+| `Azure/avm-res-databricks-workspace/azurerm` | Databricks workspace Premium | |
+| `Azure/avm-res-sql-server/azurerm` | Azure SQL server + database | Kiểm tra module có hỗ trợ free offer không; nếu không thì dùng `azurerm_mssql_database` |
+| `Azure/avm-res-datafactory-factory/azurerm` | Data Factory + managed identity | |
+| `Azure/avm-res-eventhub-namespace/azurerm` | Event Hubs namespace + hub + consumer group | |
+
+> **Quy tắc:**
+> - Pin `version = "x.y.z"` chính xác cho mọi module, và **kiểm tra số phiên bản cùng tên tham số trong README của module lúc viết code**. Các đoạn code dưới đây chỉ minh họa ý, tên tham số có thể khác theo phiên bản.
+> - Nếu module AVM thiếu một tính năng cần dùng thì dùng resource `azurerm_*` thô, không fork module.
+> - Mọi module AVM có biến `enable_telemetry`. Đặt bằng `false`.
+
+Phần dùng **resource thô** (không có AVM hoặc AVM quá nặng):
+- `azurerm_databricks_access_connector`
+- `azurerm_role_assignment`
+- `azurerm_storage_management_policy`
+- `azurerm_consumption_budget_subscription`
+- `azurerm_monitor_action_group`
+- `azurerm_key_vault_secret`
+- `random_password`
+
+## 2. Module nội bộ `naming_tags`
+
+**Vì sao cần:** 4 người đặt tên và gắn tag thống nhất, để Cost Management lọc chi phí theo `owner` và `stack`.
+
+```hcl
+# modules/naming_tags/main.tf
+module "naming" {
+  source  = "Azure/naming/azurerm"
+  version = "0.4.x"                        # pin chính xác khi code
+  suffix  = [var.project, var.env]         # vd: st + instacart + prod + random
+}
+output "tags" {
+  value = merge({ project = var.project, env = var.env, owner = var.owner,
+                  stack = var.stack, managed_by = "terraform" }, var.extra_tags)
+}
+output "names" { value = module.naming }
+```
+
+---
+
+## 3. Stack `10-core` (Sub A): làm tuần tự từng bước
+
+Mỗi bước là **một PR nhỏ**, `plan` sạch rồi mới làm bước kế tiếp. Nhờ vậy khi lỗi thì biết ngay bước nào gây ra.
+
+### Bước 3.1 · Provider, backend, resource group
+
+**Vì sao:** khung chung cho stack. Provider pin phiên bản, backend trỏ state `core.tfstate`.
+
+```hcl
+terraform {
+  required_version = "~> 1.9"
+  required_providers {
+    azurerm = { source = "hashicorp/azurerm", version = "~> 4.0" }
+  }
+  backend "azurerm" { key = "core.tfstate" }      # phần còn lại lấy từ backend.hcl
+}
+provider "azurerm" {
+  features {
+    key_vault {
+      purge_soft_delete_on_destroy = false
+    }
+  }
+  subscription_id     = var.subscription_id_a
+  storage_use_azuread = true
+}
+resource "azurerm_resource_group" "core" {
+  name     = "rg-instacart-core"
+  location = var.location
+  tags     = module.nt.tags
+}
+```
+
+### Bước 3.2 · ADLS Gen2: lakehouse
+
+**Vì sao:** đây là nơi lưu mọi tầng dữ liệu. Bật HNS (hierarchical namespace) để có thư mục thật, ACL và hiệu năng tốt cho Spark/Delta. Mỗi tầng một container để phân quyền theo container trong Unity Catalog.
+
+```hcl
+module "lake" {
+  source  = "Azure/avm-res-storage-storageaccount/azurerm"
+  version = "x.y.z"
+  name                      = module.nt.names.storage_account.name_unique
+  resource_group_name       = azurerm_resource_group.core.name
+  location                  = var.location
+  account_kind              = "StorageV2"
+  account_replication_type  = "LRS"
+  is_hns_enabled            = true
+  shared_access_key_enabled = false          # chỉ dùng Entra ID / managed identity
+  containers = { for c in ["landing","bronze","silver","gold","checkpoints","mlflow"] :
+                 c => { name = c } }
+  enable_telemetry = false
+  tags             = module.nt.tags
+}
+
+resource "azurerm_storage_management_policy" "lake" {      # rubric 3.4: tối ưu lưu trữ
+  storage_account_id = module.lake.resource_id
+  rule {
+    name    = "landing-to-cool"
+    enabled = true
+    filters {
+      blob_types   = ["blockBlob"]
+      prefix_match = ["landing/"]
+    }
+    actions {
+      base_blob {
+        tier_to_cool_after_days_since_modification_greater_than = 30
+      }
+    }
+  }
+}
+```
+
+**Kiểm tra:** `az storage fs list --account-name <st> --auth-mode login` thấy đủ 6 container.
+
+### Bước 3.3 · Key Vault
+
+**Vì sao:** chứa bí mật như mật khẩu SQL, SAS của Event Hubs và push URL của Power BI. Databricks đọc bí mật qua *secret scope* dựa trên Key Vault, nên trong code không có bí mật nào. Dùng **RBAC mode** để phân quyền bằng role Azure, không dùng access policy.
+
+```hcl
+module "kv" {
+  source  = "Azure/avm-res-keyvault-vault/azurerm"
+  version = "x.y.z"
+  name                       = module.nt.names.key_vault.name_unique
+  resource_group_name        = azurerm_resource_group.core.name
+  location                   = var.location
+  tenant_id                  = var.tenant_id
+  sku_name                   = "standard"
+  purge_protection_enabled   = false     # để destroy/dựng lại được khi làm đồ án
+  soft_delete_retention_days = 7
+  public_network_access_enabled = true    # Databricks không dùng VNet injection
+  enable_telemetry = false
+  tags = module.nt.tags
+}
+```
+
+### Bước 3.4 · Access Connector (managed identity cho Unity Catalog)
+
+**Vì sao:** Unity Catalog cần một danh tính để đọc/ghi ADLS **thay cho** người dùng. Không dùng account key hay SAS. Access Connector chính là managed identity đó. Nó được gán role trên storage, sau đó stack `30-databricks` tạo *storage credential* trỏ vào nó.
+
+```hcl
+resource "azurerm_databricks_access_connector" "uc" {
+  name                = "dbac-instacart"
+  resource_group_name = azurerm_resource_group.core.name
+  location            = var.location
+  identity { type = "SystemAssigned" }
+  tags = module.nt.tags
+}
+resource "azurerm_role_assignment" "uc_lake" {
+  scope                = module.lake.resource_id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_databricks_access_connector.uc.identity[0].principal_id
+}
+```
+
+### Bước 3.5 · Databricks workspace (Premium)
+
+**Vì sao Premium:** Unity Catalog, phân quyền bảng/cột, SQL warehouse và secret scope dựa trên Key Vault đều cần Premium. Trial 14 ngày miễn DBU.
+
+**Vì sao không bật VNet injection / Secure Cluster Connectivity + NAT:** NAT Gateway và public IP tốn tiền, đồng thời tăng rủi ro gặp lỗi quota trên Students. Đồ án không yêu cầu cô lập mạng.
+
+```hcl
+module "dbw" {
+  source  = "Azure/avm-res-databricks-workspace/azurerm"
+  version = "x.y.z"
+  name                = "dbw-instacart"
+  resource_group_name = azurerm_resource_group.core.name
+  location            = var.location
+  sku                 = "premium"
+  managed_resource_group_name = "rg-instacart-dbw-managed"
+  custom_parameters   = { no_public_ip = false }   # khớp kết quả spike
+  enable_telemetry    = false
+  tags                = module.nt.tags
+}
+output "databricks_workspace_url" { value = module.dbw.workspace_url }
+output "databricks_workspace_id"  { value = module.dbw.resource_id }
+```
+
+**Kiểm tra:** mở `https://<workspace_url>`, thấy catalog mặc định (UC tự gán) nếu spike 3.4 đạt.
+
+> Phần bên trong workspace (catalog, nhóm, policy, warehouse) **không** nằm ở đây mà ở stack `30-databricks` ([05](05_databricks_platform.md)).
+
+### Bước 3.6 · Azure SQL (nguồn `product_prices`, `promotions`)
+
+**Vì sao:** đề bài 08 yêu cầu nhiều nguồn, nhiều định dạng. Bảng giá và khuyến mãi tự sinh nằm trong một CSDL quan hệ thật, để ADF copy tăng dần theo watermark. Dùng **free offer** (serverless GP, tự pause khi hết hạn mức) để gần như không tốn tiền.
+
+```hcl
+resource "random_password" "sql" {
+  length  = 24
+  special = true
+}
+
+module "sql" {
+  source  = "Azure/avm-res-sql-server/azurerm"
+  version = "x.y.z"
+  name                         = module.nt.names.mssql_server.name_unique
+  resource_group_name          = azurerm_resource_group.core.name
+  location                     = var.location
+  administrator_login          = "sqladmin"
+  administrator_login_password = random_password.sql.result
+  databases = { retail = { name = "retail_db", sku_name = "GP_S_Gen5_2" } }
+  # free offer: kiểm tra module / azurerm_mssql_database có thuộc tính dạng use_free_limit,
+  # free_limit_exhaustion_behavior = "AutoPause". Nếu chưa có thì bật free offer bằng az CLI rồi import.
+  enable_telemetry = false
+  tags = module.nt.tags
+}
+
+resource "azurerm_mssql_firewall_rule" "azure" {           # cho ADF / Databricks (dịch vụ Azure)
+  name             = "allow-azure"
+  server_id        = module.sql.resource_id
+  start_ip_address = "0.0.0.0"
+  end_ip_address   = "0.0.0.0"
+}
+resource "azurerm_mssql_firewall_rule" "members" {          # IP của 4 thành viên để chạy seed
+  for_each = var.member_ips
+  name             = "member-${each.key}"
+  server_id        = module.sql.resource_id
+  start_ip_address = each.value
+  end_ip_address   = each.value
+}
+
+resource "azurerm_key_vault_secret" "sql_pw" {
+  name         = "sql-admin-password"
+  value        = random_password.sql.result
+  key_vault_id = module.kv.resource_id
+}
+```
+
+Script seed sinh dữ liệu giá/khuyến mãi (có seed cố định) **không** nằm trong Terraform. Nó là job DE chạy một lần (tài liệu 06), để Terraform chỉ quản lý hạ tầng.
+
+### Bước 3.7 · Azure Data Factory (factory + danh tính)
+
+**Vì sao:** ADF đảm nhận phần copy từ nguồn ngoài (HTTP Zenodo, SQL, REST OFF) vào `landing/` và lên lịch gọi job Databricks (rubric 3.2). Stack này chỉ tạo **factory + managed identity + quyền**. Linked service, pipeline và trigger nằm ở stack `40-orchestration`, vì chúng thay đổi thường xuyên.
+
+```hcl
+module "adf" {
+  source  = "Azure/avm-res-datafactory-factory/azurerm"
+  version = "x.y.z"
+  name                = module.nt.names.data_factory.name_unique
+  resource_group_name = azurerm_resource_group.core.name
+  location            = var.location
+  managed_identities  = { system_assigned = true }
+  enable_telemetry    = false
+  tags                = module.nt.tags
+}
+```
+
+Quyền của ADF managed identity:
+
+| Scope | Role | Để làm gì |
+|---|---|---|
+| ADLS `lake` | Storage Blob Data Contributor | Ghi `landing/` |
+| Key Vault | Key Vault Secrets User | Đọc mật khẩu SQL trong linked service |
+| Databricks workspace | Contributor | Linked service Databricks dùng MSI để gọi Job |
+
+### Bước 3.8 · RBAC cho 4 thành viên
+
+**Vì sao:** rubric 5.4 yêu cầu "các thành viên cùng làm trên một resource". Quyền được cấp **theo vai trò**, đủ để làm việc nhưng không đủ để xóa nền tảng.
+
+| Thành viên | Scope | Role |
+|---|---|---|
+| Cả 4 | Sub A | Reader (xem chi phí, xem tài nguyên) |
+| Cả 4 | RG `rg-instacart-core` | Contributor |
+| Cả 4 | ADLS `lake` | Storage Blob Data Contributor (xem/khám phá dữ liệu bằng Storage Explorer) |
+| Cả 4 | Key Vault | Key Vault Secrets User |
+| P1 | Key Vault | Key Vault Secrets Officer |
+| UAMI CI | Key Vault | Key Vault Secrets Officer (ghi SAS Event Hubs từ stack 20) |
+
+```hcl
+locals {
+  member_roles = flatten([for m, oid in var.member_object_ids : [
+    { k = "${m}-rg",   scope = azurerm_resource_group.core.id, role = "Contributor",                   oid = oid },
+    { k = "${m}-lake", scope = module.lake.resource_id,        role = "Storage Blob Data Contributor", oid = oid },
+    { k = "${m}-kv",   scope = module.kv.resource_id,          role = "Key Vault Secrets User",        oid = oid },
+  ]])
+}
+resource "azurerm_role_assignment" "members" {
+  for_each             = { for r in local.member_roles : r.k => r }
+  scope                = each.value.scope
+  role_definition_name = each.value.role
+  principal_id         = each.value.oid
+}
+```
+
+Quyền **bên trong Databricks** (ai đọc/ghi schema nào) được cấp bằng Unity Catalog ở tài liệu 05, không cấp bằng Azure RBAC.
+
+### Bước 3.9 · Budget và cảnh báo chi phí
+
+**Vì sao:** credit Students có hạn (khoảng 100 USD). Hết credit thì subscription bị vô hiệu hóa và tài nguyên dừng. Budget gửi email sớm cho cả nhóm. Đây cũng là bằng chứng "thông tin chi phí, quota" cho rubric 5.4.
+
+```hcl
+resource "azurerm_monitor_action_group" "team" {
+  name                = "ag-instacart-team"
+  resource_group_name = azurerm_resource_group.core.name
+  short_name          = "instacart"
+  dynamic "email_receiver" {
+    for_each = var.member_emails            # đặt trong *.auto.tfvars (gitignore)
+    content {
+      name          = email_receiver.key
+      email_address = email_receiver.value
+    }
+  }
+}
+resource "azurerm_consumption_budget_subscription" "a" {
+  name            = "budget-sub-a"
+  subscription_id = "/subscriptions/${var.subscription_id_a}"
+  amount          = 100
+  time_grain      = "Monthly"
+  time_period { start_date = "2026-11-01T00:00:00Z" }
+  dynamic "notification" {
+    for_each = [25, 50, 75, 90]
+    content {
+      threshold      = notification.value
+      operator       = "GreaterThanOrEqualTo"
+      threshold_type = "Actual"
+      contact_groups = [azurerm_monitor_action_group.team.id]
+    }
+  }
+}
+```
+
+> Budget chỉ **cảnh báo**, không tự dừng tài nguyên. Biện pháp chặn chi phí thật sự là auto-terminate của cluster (tài liệu 05) và workflow tự hủy stream mỗi đêm (tài liệu 04).
+
+### Bước 3.10 · Output của `10-core`
+
+```hcl
+output "location"                 { value = var.location }
+output "rg_name"                  { value = azurerm_resource_group.core.name }
+output "lake_account_name"        { value = module.lake.name }
+output "lake_dfs_endpoint"        { value = "abfss://{container}@${module.lake.name}.dfs.core.windows.net" }
+output "key_vault_id"             { value = module.kv.resource_id }
+output "key_vault_uri"            { value = module.kv.uri }
+output "access_connector_id"      { value = azurerm_databricks_access_connector.uc.id }
+output "databricks_workspace_url" { value = module.dbw.workspace_url }
+output "databricks_workspace_id"  { value = module.dbw.resource_id }
+output "adf_id"                   { value = module.adf.resource_id }
+output "sql_server_fqdn"          { value = module.sql.resource.fully_qualified_domain_name }
+```
+
+**Checklist `10-core`:**
+- [ ] `terraform plan` lần hai báo *No changes*. Nếu vẫn còn thay đổi thì cấu hình không ổn định.
+- [ ] 6 container có trong ADLS; shared key bị tắt.
+- [ ] Mở được workspace; P2–P4 đăng nhập được workspace bằng tài khoản trường.
+- [ ] `sqlcmd` (hoặc Azure Data Studio) kết nối `retail_db` từ IP thành viên được.
+- [ ] Email test của action group đến được cả 4 người.
+
+---
+
+## 4. Stack `20-stream` (Sub B): Event Hubs theo buổi
+
+**Vì sao ở Sub B:**
+- Chia chi phí: Event Hubs Standard tính theo giờ TU.
+- **Cố ý đặt ở region khác** Sub A để đo độ trễ liên region (rubric 3.3).
+
+**Vì sao Standard:** chỉ từ tier Standard mới có Kafka endpoint (`:9093`), mà Spark Structured Streaming dùng Kafka source.
+
+```hcl
+provider "azurerm" {                       # Sub B — nơi tạo Event Hubs
+  features {}
+  subscription_id = var.subscription_id_b
+}
+provider "azurerm" {                       # Sub A — chỉ để ghi secret vào Key Vault
+  alias           = "core"
+  features {}
+  subscription_id = var.subscription_id_a
+}
+
+module "eh" {
+  source  = "Azure/avm-res-eventhub-namespace/azurerm"
+  version = "x.y.z"
+  name                = "evhns-instacart-${random_string.sfx.result}"
+  resource_group_name = azurerm_resource_group.stream.name
+  location            = var.location_b                  # KHÁC region của Sub A
+  sku                 = "Standard"
+  capacity            = 1                               # 1 TU là đủ cho replay khoảng 131k đơn
+  event_hubs = {
+    orders-stream = {
+      name              = "orders-stream"
+      partition_count   = 2
+      message_retention = 1   # ngày
+      consumer_groups = { dbx = { name = "dbx-bronze" } }
+    }
+  }
+  enable_telemetry = false
+  tags = module.nt.tags
+}
+
+resource "azurerm_eventhub_authorization_rule" "listen" {   # Databricks chỉ được đọc
+  name                = "dbx-listen"
+  namespace_name      = module.eh.resource.name
+  eventhub_name       = "orders-stream"
+  resource_group_name = azurerm_resource_group.stream.name
+  listen              = true
+  send                = false
+  manage              = false
+}
+# tương tự: "sim-send" (send = true, listen = false) cho simulator
+
+resource "azurerm_key_vault_secret" "eh_listen" {        # Databricks đọc qua secret scope
+  provider     = azurerm.core
+  name         = "eh-listen-connection-string"
+  value        = azurerm_eventhub_authorization_rule.listen.primary_connection_string
+  key_vault_id = data.terraform_remote_state.core.outputs.key_vault_id
+}
+# tương tự: eh-send-connection-string cho simulator, eh-bootstrap-server = "<ns>.servicebus.windows.net:9093"
+```
+
+**Vì sao dùng SAS mà không dùng managed identity:** Databricks classic compute không có sẵn danh tính Entra để gọi Event Hubs. Kafka client dùng SASL/PLAIN với connection string là cách đơn giản nhất. Hai rule SAS **tách quyền** send và listen, và chỉ được lưu trong Key Vault.
+
+**Bật/tắt:** workflow `stream-toggle.yml` ([04](04_github_actions_cicd.md)) chạy `terraform apply`/`destroy` riêng stack này. Khi destroy, secret trong Key Vault bị xóa theo. Lần apply sau tạo SAS mới, và job streaming đọc lại secret khi khởi động.
+
+> Vì `message_retention` ngắn và namespace bị hủy hằng đêm, **tính lặp lại của demo** không dựa vào Event Hubs. Nó dựa vào simulator replay deterministic, cộng với `event_id` + MERGE ở silver (đã thống nhất trong data dictionary).
+
+**Checklist `20-stream`:**
+- [ ] `kcat -b <ns>.servicebus.windows.net:9093 -X security.protocol=SASL_SSL -X sasl.mechanisms=PLAIN -X sasl.username='$ConnectionString' -X sasl.password='<send>' -t orders-stream -P` gửi được 1 message.
+- [ ] Secret `eh-*` xuất hiện trong Key Vault Sub A.
+- [ ] `destroy` rồi `apply` lại chạy được trong vòng 5 phút.
+
+---
+
+## 5. Stack `90-sandbox` (Sub C/D): workspace #2 cho DS
+
+**Vì sao:** quota vCPU tính **theo subscription**. Train FP-Growth / DApriori với nhiều cấu hình (rubric "trực quan kết quả trên các tham số") cần chạy song song với pipeline DE mà không giành 4 vCPU của Sub A.
+
+Stack này dùng lại module nội bộ `modules/dbx_workspace` (workspace + access connector + storage nhỏ), mỗi thành viên một state `sandbox-<member>.tfstate`:
+
+```hcl
+module "ws2" {
+  source   = "../../modules/dbx_workspace"
+  name     = "dbw-instacart-sbx-${var.member}"
+  location = var.location_c
+  sku      = "premium"
+  tags     = module.nt.tags
+}
+```
+
+Workspace sandbox **gắn vào cùng metastore** Unity Catalog. Metastore tính theo region, nên điều này chỉ đúng khi Sub C ở **cùng region** với Sub A. Khi đó DS đọc thẳng `instacart.silver.baskets` mà không phải sao chép dữ liệu. Nếu khác region thì phải dùng Delta Sharing hoặc sao chép bảng `baskets` sang storage của sandbox. Ghi lựa chọn này vào kết quả spike.
+
+Stack này **chỉ cần dựng ở G3**, khi DS bắt đầu.
+
+---
+
+## 6. Thứ tự apply và phụ thuộc
+
+| Thứ tự | Stack | Cần có trước | Ai apply (giai đoạn đầu → ổn định) |
+|---|---|---|---|
+| 0 | bootstrap | — | P1 local (một lần duy nhất) |
+| 1 | 10-core | bootstrap | P1 local → CI (`tf-apply`) |
+| 2 | 30-databricks | 10-core | P1 local → CI |
+| 3 | 20-stream | 10-core (Key Vault) | P3 hoặc CI `stream-toggle` |
+| 4 | 40-orchestration | 10-core, 30-databricks (job ID) | CI |
+| 5 | 90-sandbox | bootstrap (+ metastore) | P4 local |
+
+`terraform destroy` đi theo **thứ tự ngược lại**. Lưu ý: muốn destroy `10-core` thì phải destroy `30` và `40` trước. Nếu không, provider databricks sẽ báo lỗi vì không còn workspace.
