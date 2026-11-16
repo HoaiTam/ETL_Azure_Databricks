@@ -8,7 +8,11 @@ Cách dùng (cần `gh` đã đăng nhập, có scope `project`):
     python3 scripts/sync_task_board.py --apply    # ghi lại Input status và Còn chờ
     python3 scripts/sync_task_board.py --report   # in task Sẵn sàng theo Owner
 
-Script không đổi Status, Owner, Assignees và không tạo thẻ.
+Script không đổi Status, Owner, Assignees và không tạo thẻ. Issue đã đóng (completed)
+được tính là Done dù Status trên Project chưa kịp đổi.
+
+Workflow `.github/workflows/sync-task-board.yml` chạy `--apply` tự động khi đóng/mở lại
+issue và theo lịch, dùng secret `PROJECT_TOKEN`.
 """
 
 from __future__ import annotations
@@ -48,7 +52,7 @@ def load_project() -> tuple[str, dict, dict]:
       fields(first:40){nodes{... on ProjectV2FieldCommon{id name}
         ... on ProjectV2SingleSelectField{options{id name}}}}
       items(first:100,after:$c){pageInfo{hasNextPage endCursor} nodes{id
-        content{... on Issue{number}}
+        content{... on Issue{number state stateReason}}
         fieldValues(first:30){nodes{
           ... on ProjectV2ItemFieldSingleSelectValue{name field{... on ProjectV2FieldCommon{name}}}
           ... on ProjectV2ItemFieldTextValue{text field{... on ProjectV2FieldCommon{name}}}}}}}}}}"""
@@ -64,6 +68,10 @@ def load_project() -> tuple[str, dict, dict]:
                 for v in node["fieldValues"]["nodes"]
                 if v and v.get("field")
             }
+            # Issue đã đóng dạng completed thì coi như Done, kể cả khi workflow của Project
+            # chưa kịp đổi Status (sự kiện đóng issue đến trước).
+            if node["content"].get("state") == "CLOSED" and node["content"].get("stateReason") == "COMPLETED":
+                values["Status"] = "Done"
             items[number] = {"id": node["id"], **values}
         page = project["items"]["pageInfo"]
         if not page["hasNextPage"]:
