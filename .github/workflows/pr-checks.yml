@@ -1,5 +1,6 @@
 # Kiểm tra tĩnh trên mọi PR (docs/devops/04, mục 3.1).
-# Status check bắt buộc trong branch protection: terraform, python, bundle.
+# Status check bắt buộc trong branch protection: terraform, python, bundle
+# (cùng title, commits, body của pr-lint).
 name: pr-checks
 
 on:
@@ -15,7 +16,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  terraform:
+  terraform-dir:
+    # Matrix sinh check tên `terraform (<thư mục>)`; branch protection không bắt được
+    # từng tên này, nên job `terraform` ở dưới gom kết quả thành một check bắt buộc.
+    name: terraform (${{ matrix.dir }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -45,6 +49,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
       - run: tflint --config="$GITHUB_WORKSPACE/.tflint.hcl" --format=compact
+
+  terraform:
+    # Check bắt buộc: chỉ xanh khi mọi thư mục trong matrix đều xanh.
+    needs: terraform-dir
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Gom kết quả matrix
+        run: |
+          echo "terraform-dir: ${{ needs.terraform-dir.result }}"
+          test "${{ needs.terraform-dir.result }}" = "success"
 
   trivy:
     # Chưa chặn merge (exit-code 0): xem kết quả trong log, sửa dần theo từng bước của 10-core.
