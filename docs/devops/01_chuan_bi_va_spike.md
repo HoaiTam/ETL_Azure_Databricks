@@ -14,11 +14,11 @@
 |---|---|---|---|
 | Azure CLI | mới nhất | Đăng nhập, kiểm tra policy/quota, backend Terraform | `brew install azure-cli` |
 | Terraform | `~> 1.9` (pin trong `required_version`) | IaC | `brew install hashicorp/tap/terraform` |
-| TFLint + ruleset azurerm | mới nhất | Lint Terraform | `brew install tflint` |
+| TFLint + ruleset azurerm | mới nhất | Lint Terraform | Homebrew core đã bỏ `tflint`. Tải từ GitHub release: `gh release download -R terraform-linters/tflint -p 'tflint_darwin_arm64.zip' -p checksums.txt`, kiểm `shasum -a 256 -c`, giải nén vào `~/.local/bin`. Sau đó chạy `tflint --init` |
 | Trivy (hoặc Checkov) | mới nhất | Quét cấu hình sai về bảo mật | `brew install trivy` |
 | Databricks CLI (bản mới, có `bundle`) | `>= 0.230` | Databricks Asset Bundles, kiểm tra workspace | `brew tap databricks/tap && brew install databricks` |
 | GitHub CLI | mới nhất | PR, secret, environment | `brew install gh` |
-| pre-commit | mới nhất | Chạy fmt/lint trước khi commit | `brew install pre-commit` |
+| pre-commit | mới nhất | Chạy fmt/lint trước khi commit | `uv tool install pre-commit --python 3.11` rồi `pre-commit install` trong repo. Bản `brew install pre-commit` chạy trên Python 3.15 của Homebrew và có thể lỗi `pyexpat` khi tạo virtualenv |
 | Python 3.11 + uv | 3.11 (khớp Databricks Runtime) | Code PySpark, test | `brew install uv && uv python install 3.11` |
 | Docker Desktop | mới nhất; máy chạy benchmark DS cấp cho Docker ≥ 8 CPU, ≥ 16 GB RAM | Spark/Kafka local; cụm Hadoop HDFS + YARN cho MapReduce ([ds/03](../ds/03_hadoop_mapreduce_local.md)) | — |
 | AzCopy | 10.x | Tải file thực nghiệm từ container `ds`, upload kết quả benchmark (đăng nhập bằng `az login`) | `brew install azcopy` |
