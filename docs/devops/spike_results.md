@@ -8,7 +8,7 @@ Ngày làm spike: `<yyyy-mm-dd>` · Người tổng hợp: P1
 
 | Thành viên | az | terraform | tflint | databricks | gh | uv | Docker | Ghi chú |
 |---|---|---|---|---|---|---|---|---|
-| P1 | | | | | | | | |
+| P1 | 2.91.0 | 1.16.5 | 0.66.0 | 1.26.0 | 2.104.0 | 0.9.21 (Python 3.11.14) | 29.1.3 | macOS arm64, kiểm ngày 2026-11-16. Thêm: trivy 0.76.2, pre-commit 4.7.0, AzCopy 10.34.2, Infracost 2.19.1. tflint cài từ GitHub release. Docker cấp 10 CPU, 15,6 GB RAM, thiếu một chút so với mốc 16 GB cho benchmark DS. `pre-commit run --all-files` chạy được |
 | P2 | | | | | | | | |
 | P3 | | | | | | | | |
 | P4 | | | | | | | | |
