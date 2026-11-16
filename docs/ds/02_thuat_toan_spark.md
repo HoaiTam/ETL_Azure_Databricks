@@ -238,7 +238,7 @@ def fpgrowth(df: DataFrame, min_support: float, min_conf: float, num_partitions:
 **Ba điểm phải ghi rõ khi so sánh:**
 1. **FP-Growth không có `max_k`.** Ở cấp product (k ≤ 3), FP-Growth vẫn tìm cả tập dài hơn, nên thời gian của nó tính cả phần đó. Khi so **kết quả**, lọc `size(items) <= 3`. Khi so **thời gian**, ghi chú sự khác biệt này. Thực tế ở cấp product với MinSupp ≥ 0,001, tập dài hơn 3 rất ít.
 2. **Tính exhaustive.** Bài báo nói PFP chỉ trả top-Q tập dài nhất. Test ở mục 6 cho thấy `FPGrowth` của Spark 3.5 trả về **mọi** tập ≥ minSupport, khớp đúng từng tập với đếm vét cạn. E1 lặp lại phép so này trên dữ liệu thật. Đây là một kết luận nên nêu trong báo cáo: nhận định của bài báo có thể đúng với bản PFP gốc dùng cho gợi ý truy vấn, nhưng không đúng với MLlib hiện tại.
-3. **`numPartitions`** là tham số cấu hình riêng của FP-Growth, nằm trong lưới thực nghiệm (hình kiến trúc: "cấu hình: shuffle partitions, cache"). Mặc định bằng số partition của input.
+3. **`numPartitions`** là tham số cấu hình riêng của FP-Growth, nằm trong lưới thực nghiệm (bản đầu của hình kiến trúc ghi "cấu hình: shuffle partitions, cache"). Mặc định bằng số partition của input.
 
 ## 6. Kiểm tra đúng đắn
 

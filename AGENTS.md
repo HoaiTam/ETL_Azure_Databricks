@@ -10,7 +10,9 @@ Cách tổ chức các file hướng dẫn:
 
 Đồ án nhóm 4 người: ETL dữ liệu **Instacart Market Basket** trên **Azure + Databricks**.
 - **Nguồn phụ:** Open Food Facts và một CSDL Azure SQL `retail_db` tự sinh.
-- **Đầu ra:** dashboard Power BI và phân tích luật kết hợp (FP-Growth).
+- **Đầu ra:** dashboard Power BI và phân tích luật kết hợp (DApriori, DATID, FP-Growth; so sánh Hadoop MapReduce với Spark).
+- **Bài báo nền tảng của phần DS:** Fernandez-Basso, Ruiz, Martin-Bautista, *New Spark solutions for distributed frequent itemset and association rule mining algorithms*, Cluster Computing 27 (2024), [doi:10.1007/s10586-023-04014-w](https://doi.org/10.1007/s10586-023-04014-w).
+  - Phần DS bám bài này. Chỗ nào làm đúng, chỗ nào điều chỉnh hay bổ sung được chốt ở `docs/ds/00_tong_quan_ds.md` §2. Đọc mục đó trước khi viết code trong `src/ml/` hay `src/mapreduce/`.
 - **Rubric chấm điểm:**
   - Trọng tâm là mục 4 (phân tích + trực quan).
   - Cần thêm bằng chứng cho mục 3 (hiệu năng, ETL tự động, độ trễ khác region) và mục 5.4 (làm việc nhóm, chi phí, quota).
@@ -19,11 +21,12 @@ Cách tổ chức các file hướng dẫn:
 
 | Việc | Đọc |
 |---|---|
+| Mục đích, kiến trúc, quy trình chung của cả dự án (bắt đầu ở đây) | `docs/00_tong_quan_du_an.md` |
 | Hạ tầng, CI/CD, Unity Catalog, cổng G0–G5 | `docs/devops/00_tong_quan.md` → file 01–06 |
 | Pipeline dữ liệu (ingest, bronze, silver, gold, streaming, chạy lại, dữ liệu cho DS) | `docs/de/00_tong_quan_de.md` → file 01–08 |
 | Data Science (DApriori/DATID/FP-Growth, thực nghiệm, Hadoop MapReduce local, MLflow, API) | `docs/ds/00_tong_quan_ds.md` → file 01–05 |
 | Ý nghĩa bảng, cột, khóa, số dòng đối soát | `docs/data/data_dictionary.md` |
-| Kiến trúc tổng thể | `docs/architecture/*.png` |
+| Kiến trúc tổng thể | `docs/architecture/*.png` (hình 1 tổng thể, 2 bên trong Databricks, 3 chỉ icon) |
 
 **Vai trò:**
 - **P1** Platform/DevOps (Sub A)

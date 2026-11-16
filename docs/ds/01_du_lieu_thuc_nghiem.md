@@ -133,11 +133,11 @@ FROM instacart.ds_data.holdout_eval WHERE data_version = 'v1';
 
 ## 4. Lưới MinSupport theo cấp item
 
-Hình kiến trúc đề xuất `minSupport ∈ {0.001, 0.002, 0.005, 0.01}` và `minConfidence ∈ {0.1, 0.2, 0.3}`. Lưới này hợp với cấp **product**. Hai cấp còn lại có ít item hơn nhiều nên support cao hơn hẳn; dùng lưới trên thì DApriori exhaustive sẽ bùng nổ tổ hợp. Mỗi cấp cần lưới riêng:
+Bản đầu của hình kiến trúc đề xuất `minSupport ∈ {0.001, 0.002, 0.005, 0.01}` và `minConfidence ∈ {0.1, 0.2, 0.3}`. Lưới này hợp với cấp **product**. Hai cấp còn lại có ít item hơn nhiều nên support cao hơn hẳn; dùng lưới trên thì DApriori exhaustive sẽ bùng nổ tổ hợp. Mỗi cấp cần lưới riêng:
 
 | `grain` | `min_support` | `max_k` | `min_confidence` | Lý do |
 |---|---|---|---|---|
-| `product` | 0.01, 0.005, 0.002, 0.001 | 3 | 0.1, 0.2, 0.3 | Như hình kiến trúc. k ≤ 3 vì giỏ dài và có 49 nghìn item |
+| `product` | 0.01, 0.005, 0.002, 0.001 | 3 | 0.1, 0.2, 0.3 | Như đề xuất ban đầu. k ≤ 3 vì giỏ dài và có 49 nghìn item |
 | `aisle` | 0.1, 0.05, 0.02, 0.01 | không giới hạn | 0.3, 0.5, 0.7 | Tái hiện điều kiện bài báo (exhaustive) |
 | `department` | 0.2, 0.1, 0.05 | không giới hạn | 0.5, 0.7, 0.9 | Ít item: tập phổ biến dài, kiểm tra được giới hạn hàm mũ |
 

@@ -43,7 +43,7 @@ Kết quả chọn ghi vào bảng `ml.champion (alias, run_key, min_confidence,
 
 ### 2.2 Model `pyfunc`: giỏ hàng → món gợi ý
 
-Model Serving không chạy được model Spark (`FPGrowthModel`), vì endpoint phục vụ không có Spark. Vì vậy luật của champion được xuất ra file Parquet và bọc trong một model **`pyfunc` thuần Python**: tra luật theo vế trái, giống hệt logic SQL ở [04 §7.2](04_thuc_nghiem_danh_gia.md). Hình kiến trúc ghi "FPGrowthModel tốt nhất"; trên thực tế thứ được đăng ký là **luật của FP-Growth** đóng gói thành `pyfunc`.
+Model Serving không chạy được model Spark (`FPGrowthModel`), vì endpoint phục vụ không có Spark. Vì vậy luật của champion được xuất ra file Parquet và bọc trong một model **`pyfunc` thuần Python**: tra luật theo vế trái, giống hệt logic SQL ở [04 §7.2](04_thuc_nghiem_danh_gia.md). Bản đầu của hình kiến trúc ghi "FPGrowthModel tốt nhất"; trên thực tế thứ được đăng ký là **luật của FP-Growth** đóng gói thành `pyfunc`.
 
 ```python
 # src/ml/serving/basket_rules.py
