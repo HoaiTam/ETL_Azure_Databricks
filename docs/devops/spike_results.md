@@ -17,11 +17,11 @@ Ngày làm spike: `<yyyy-mm-dd>` · Người tổng hợp: P1
 
 | # | Phép thử | Sub | Kết quả (Đạt / Không đạt) | Ghi chú / phương án dự phòng đã chọn |
 |---|---|---|---|---|
-| 3.1 | Region được phép | A, B, C, D | Đạt (Sub A) · Sub B, C, D chưa kiểm | Sub A, kiểm 2026-11-16: policy "Allowed resource deployment regions" chỉ cho `malaysiawest`, `eastasia`, `koreacentral`, `japaneast`, `indiasouthcentral`. Giao với Databricks: `eastasia`, `koreacentral`, `japaneast` (Event Hubs, SQL, ADF, Key Vault, Functions có ở cả 5). Ứng viên Sub A: `eastasia`. Region khác cho Event Hubs nếu Sub B cùng danh sách: `japaneast` hoặc `koreacentral`. Mỗi chủ Sub B/C/D tự chạy lệnh 3.1 |
+| 3.1 | Region được phép | A, B, C, D | Đạt (Sub A) · Sub B, C, D hoãn sang #131 | Sub A, kiểm 2026-11-16: policy "Allowed resource deployment regions" chỉ cho `malaysiawest`, `eastasia`, `koreacentral`, `japaneast`, `indiasouthcentral`. Giao với Databricks: `eastasia`, `koreacentral`, `japaneast` (Event Hubs, SQL, ADF, Key Vault, Functions có ở cả 5). Ứng viên Sub A: `eastasia`. Region khác cho Event Hubs nếu Sub B cùng danh sách: `japaneast` hoặc `koreacentral`. Mỗi chủ Sub B/C/D tự chạy lệnh 3.1 |
 | 3.2 | Quota vCPU (tổng / theo họ máy) | A | Đạt | Giống nhau ở `eastasia`, `koreacentral`, `japaneast`: tổng regional 6 vCPU (low-priority 3); DSv2 4, DSv3 4, Dv3 4, BS 4; DDSv5, DSv5, EDv4 bằng 0. Một `Standard_DS3_v2` (4 vCPU) dùng gần hết quota, còn 2 vCPU tổng nhưng không đủ cho node DSv2 thứ hai |
 | 3.3 | Tạo UAMI | A | Đạt | P1 là Owner của Sub A. Tạo `id-spike` trong `rg-spike` (`eastasia`) được |
 | 3.3 | Federated credential cho UAMI | A | Đạt | Subject `repo:<owner>/<repo>:ref:refs/heads/main`. Tên credential phải dài 3–120 ký tự: tên `gh` trong lệnh cũ bị từ chối, dùng `gh-main` |
-| 3.3 | Gán role chéo subscription (Sub B → UAMI) | B | Chưa kiểm | Chờ P3 chạy lệnh gán Contributor trên Sub B cho principal của `id-spike` (P1 gửi principal ID riêng, không ghi vào repo). Dự phòng: CI chỉ apply Sub A, Sub B do P3 apply từ máy |
+| 3.3 | Gán role chéo subscription (Sub B → UAMI) | B | Hoãn (#131) | Chưa cần Sub B trước G2. Áp dụng dự phòng cho tới khi P3 thử: CI chỉ apply Sub A, Sub B do P3 apply từ máy |
 | 3.3 | Tạo App Registration | — | Đạt | Tạo `spike-app` được. Thiết kế vẫn dùng UAMI |
 | 3.3 | Tạo nhóm Entra ID | — | Đạt | Tạo `spike-grp` được, nên có thể dùng nhóm Entra cho quyền |
 | 3.4 | Tạo workspace Premium | A | | |
