@@ -1,14 +1,20 @@
-# Thay các placeholder bằng GitHub username thật của từng vai (tài liệu docs/devops/00, mục 4):
-#   P1_HANDLE = Platform / DevOps   P2_HANDLE = DE batch
-#   P3_HANDLE = DE streaming        P4_HANDLE = BI / DS
+# Code owner theo vai (tài liệu docs/devops/00, mục 4):
+#   P1 = @Vinh5905   Platform / DevOps
+#   P2 = @HoaiTam    DE batch
+#   P3 = @mtuan2491  DE streaming
+#   P4 = @P4_HANDLE  BI / DS (chưa có username: thay khi thành viên thứ 4 vào repo)
 # Quy tắc ở dưới ghi đè quy tắc ở trên, nên dòng cụ thể đặt sau dòng chung.
+# Dòng còn @P4_HANDLE chưa có owner hợp lệ, GitHub sẽ không yêu cầu review cho các đường dẫn đó.
 
-/infra/                       @P1_HANDLE
-/.github/                     @P1_HANDLE
-/infra/stacks/20-stream/      @P3_HANDLE @P1_HANDLE
-/bundles/                     @P2_HANDLE @P3_HANDLE
-/adf/                         @P2_HANDLE
-/src/batch/                   @P2_HANDLE
-/src/streaming/               @P3_HANDLE
+/infra/                       @Vinh5905
+/.github/                     @Vinh5905
+/infra/stacks/20-stream/      @mtuan2491 @Vinh5905
+/bundles/                     @HoaiTam @mtuan2491
+/adf/                         @HoaiTam
+/src/batch/                   @HoaiTam
+/src/streaming/               @mtuan2491
 /powerbi/                     @P4_HANDLE
 /src/ml/                      @P4_HANDLE
+/src/mapreduce/               @P4_HANDLE
+/local/hadoop/                @P4_HANDLE
+/src/serving_func/            @P4_HANDLE
