@@ -73,7 +73,7 @@ az vm list-usage --location <region> -o table | grep -Ei "total regional|DSv2|DS
 | Thử | Lệnh / thao tác | Nếu bị chặn |
 |---|---|---|
 | Tạo user-assigned managed identity | `az identity create -g rg-spike -n id-spike` | Không có phương án dự phòng tốt; báo giảng viên. Nếu là Owner của subscription thì thường làm được |
-| Thêm federated credential cho UAMI | `az identity federated-credential create --identity-name id-spike -g rg-spike --name gh --issuer https://token.actions.githubusercontent.com --subject repo:<org>/<repo>:ref:refs/heads/main --audiences api://AzureADTokenExchange` | CI chỉ chạy kiểm tra tĩnh; `apply` chạy từ máy P1 |
+| Thêm federated credential cho UAMI | `az identity federated-credential create --identity-name id-spike -g rg-spike --name gh-main --issuer https://token.actions.githubusercontent.com --subject repo:<org>/<repo>:ref:refs/heads/main --audiences api://AzureADTokenExchange` | CI chỉ chạy kiểm tra tĩnh; `apply` chạy từ máy P1 |
 | Gán role chéo subscription (chủ Sub B gán Contributor cho UAMI của Sub A) | `az role assignment create --assignee <uami-principal-id> --role Contributor --scope /subscriptions/<subB>` | CI chỉ apply Sub A; Sub B do P3 apply từ máy |
 | Tạo App Registration (chỉ để biết) | `az ad app create --display-name spike-app` | Không ảnh hưởng, vì thiết kế dùng UAMI |
 | Tạo nhóm Entra ID | `az ad group create --display-name spike-grp --mail-nickname spikegrp` | Quản lý nhóm ở mức Databricks (account/workspace group) thay cho nhóm Entra |
