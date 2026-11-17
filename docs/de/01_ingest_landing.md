@@ -135,8 +135,9 @@ không cho cửa sổ cũ/bỏ khoảng trống/hạ mốc. Update mốc và log
 retry cùng `(adf_run_id, capture_instance)` và nội dung là no-op, khác nội dung báo lỗi.
 Chỉ gọi setter sau khi công bố landing và xóa staging thành công.
 
-**Spike free offer vẫn bắt buộc (#8):** đã có regression SQL Server local, chưa phải bằng chứng Azure SQL
-free offer chạy được CDC bằng admin Entra. Nếu spike chọn dự phòng, dùng §3.7 và không chạy 02/03.
+**Spike free offer đã đạt (#8, PR #141):** P1 xác nhận CDC trên Azure SQL free offer.
+AD-DE-04 vẫn cần chạy nghiệm thu trên `retail_db` do #14 cấp; kết quả local không thay thế bước này.
+Nhánh §3.7 chỉ là dự phòng, không chạy cùng 02/03.
 
 LSN được truyền qua ADF dưới dạng **chuỗi hex cố định 22 ký tự** (`0x` + 20 chữ số hex). Chuỗi cùng độ dài thì so sánh theo thứ tự chữ cũng chính là so sánh theo số. Nhờ vậy ở silver có thể dùng chuỗi này trực tiếp trong `SEQUENCE BY`.
 
@@ -241,9 +242,11 @@ Nhánh `snapshot`:
 ```
 
 - `_op = 0` nghĩa là bản ghi snapshot, silver xử lý như upsert.
-- Snapshot đọc bảng tại thời điểm `to_lsn`. Nhóm chỉ chạy `seed_retail_db` khi ADF **không** chạy, nên không có thay đổi chen vào giữa. Hệ thống thật cần snapshot có khóa nhất quán hơn.
+- Snapshot đọc **bảng hiện hành**, không được ghim thành ảnh lịch sử ở `to_lsn`.
+  Có thể chồng lấn với cửa sổ CDC sau; silver xử lý bằng upsert theo khóa và `SEQUENCE BY`.
+  Không chạy seed đồng thời ADF và chờ capture bắt kịp trước Lookup; hệ thống ghi liên tục cần cơ chế snapshot nhất quán hơn.
 
-Đoạn JSON của activity gọi watermark (dán vào `adf/pipelines/pl_cdc_one_table.json`):
+Đoạn JSON của activity gọi watermark **nhánh window** (dán vào `adf/pipelines/pl_cdc_one_table.json`):
 
 ```json
 {
@@ -264,6 +267,10 @@ Nhánh `snapshot`:
   }
 }
 ```
+
+Ở nhánh `snapshot` và `empty`, **không khai báo** `from_lsn` trong `storedProcedureParameters`;
+để procedure dùng mặc định SQL NULL. Không map `firstRow.from_lsn` rỗng/null thành String vì ADF có thể
+gửi chuỗi rỗng, gây lỗi định dạng 51003. Chỉ nhánh `window` dùng tham số này như ví dụ trên.
 
 ### 3.6 Vì sao CDC theo cách này không mất và không trùng
 

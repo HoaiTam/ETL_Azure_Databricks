@@ -6,7 +6,8 @@ firewall, tài khoản hay quyền cloud; các phần đó thuộc AD-OPS-12.
 
 ## Điều kiện trước khi chạy trên Azure
 
-- AD-OPS-12 (#14) cấp `retail_db`, firewall và admin Entra; AD-OPS-06 (#8) chốt CDC hay dự phòng.
+- AD-OPS-12 (#14) cấp `retail_db`, firewall và admin Entra. Spike AD-OPS-06 (#8, PR #141)
+  đã xác nhận CDC free offer; vẫn cần nghiệm thu trên database chính thức, không dùng kết quả spike thay thế.
 - Dùng đúng admin Entra của server, kết nối **retail_db**, không phải `master`.
   Bật CDC trên Azure SQL cần quyền `db_owner`; ADF chỉ dùng quyền đọc nguồn/CDC và EXECUTE
   các procedure cần thiết do P1 cấp, không dùng admin cho pipeline.
@@ -35,7 +36,9 @@ sqlcmd -S "$RETAIL_SQL_SERVER" -d retail_db --authentication-method ActiveDirect
 ```
 
 Kiểm phiên bản client hỗ trợ `-Nm` (mã hóa bắt buộc), không dùng `-C` để bỏ kiểm chứng chỉ Azure.
-Có thể mở từng file trong công cụ SQL hỗ trợ `GO`, đăng nhập Entra tương tác và thực thi tuần tự.
+**Chỉ chạy bằng `sqlcmd -b`**, hoặc dùng công cụ đã bật **SQLCMD mode** và thêm `:On Error exit`
+trước khi chạy toàn file. Chế độ SQL thông thường chỉ hỗ trợ `GO` chưa đủ: sau `THROW` ở một batch,
+client có thể vẫn chạy các batch sau và tạo procedure của nhánh bị từ chối. Không chạy toàn file ở chế độ đó.
 `GO` là dấu phân batch của client, không gửi nguyên file qua một lần `cursor.execute()`.
 Cách xác thực: [Microsoft Learn về sqlcmd Entra](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-authentication),
 [tùy chọn sqlcmd](https://learn.microsoft.com/en-us/sql/tools/sqlcmd/sqlcmd-utility).
@@ -67,7 +70,10 @@ không phải `empty`. Kiểm retention theo `increment(last_lsn) < min_lsn`, v�
 `@from_lsn = NULL`, `@rows = NULL`. Truyền nguyên output Lookup, không tính lại LSN sau Copy:
 
 - Chỉ gọi sau Copy → công bố thư mục landing tất định → xóa staging đều thành công.
-- `window` bắt buộc có `from_lsn`; `snapshot` và `empty` truyền NULL. `empty` có `rows = 0` hoặc NULL,
+- `window` bắt buộc có `from_lsn`; với activity Stored Procedure của `snapshot` và `empty`,
+  **bỏ hẳn tham số `from_lsn` khỏi `storedProcedureParameters`** để dùng mặc định SQL NULL.
+  Không map `firstRow.from_lsn` thành String vì ADF có thể gửi chuỗi rỗng (setter từ chối với 51003).
+  `empty` có `rows = 0` hoặc NULL,
   chỉ ghi log, không đổi watermark hay thời điểm cập nhật mốc.
 - Một transaction khóa dòng watermark theo capture instance, cập nhật mốc và ghi log nguyên tử.
 - Khóa log `(adf_run_id, capture_instance)` cho phép retry cùng tham số là no-op,
@@ -139,7 +145,7 @@ SQL Server image là amd64; máy Apple Silicon cần giả lập Docker (đã ki
 
 ## Nghiệm thu Azure còn chờ
 
-Sau khi #14 và #8 hoàn tất, chạy nhánh đã chọn bằng admin Entra rồi chạy lại lần hai.
+Sau khi #14 hoàn tất, chạy nhánh CDC đã đạt spike #8/#141 bằng admin Entra rồi chạy lại lần hai.
 Trước lần ADF đầu, kiểm nguồn/mốc chưa có dữ liệu cũ; nếu mốc đã tồn tại, không tự reset để ép snapshot.
 Với CDC, lưu kết quả `is_cdc_enabled`, hai dòng `cdc.change_tables`, retention từ `sys.sp_cdc_help_jobs`
 và hai lệnh Lookup trả `snapshot` (chờ scheduler sẵn sàng rồi thử lại nếu LSN chưa sẵn sàng).
