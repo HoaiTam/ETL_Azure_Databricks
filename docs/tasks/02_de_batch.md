@@ -173,8 +173,8 @@ Expectations chỉ đếm dòng bị bỏ. Bảng quarantine_* giữ nội dung 
 - Đã cập nhật ví dụ batch/stream dùng cùng bộ luật và helper; quarantine sự kiện giữ `value_json`.
   Chưa triển khai pipeline silver thật (AD-DE-11/12, AD-ST-05); **chưa kiểm trên workspace**
   vì máy chưa có Databricks CLI/cấu hình workspace.
-- Hoàn tất kiểm tra local G0; điều kiện hoàn tất phụ thuộc AD-DE-01 vẫn chờ PR #135 merge.
-  Nhánh AD-DE-03 dựa trên #135, độc lập với AD-DE-02 (#137).
+- Hoàn tất kiểm tra local G0; phụ thuộc AD-DE-01 đã được merge qua PR #135.
+  Nhánh AD-DE-03 đã đồng bộ main sau #135, độc lập với AD-DE-02 (#137).
 
 ### AD-DE-04
 
