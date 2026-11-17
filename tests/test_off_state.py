@@ -1,5 +1,6 @@
 """Kiểm chọn lô bằng Spark thật, bootstrap CSV và cú pháp/lifecycle của adapter trạng thái."""
 
+import datetime as dt
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -49,6 +50,8 @@ def test_merge_sql_parses_and_failed_merge_cleans_temp_view_without_changing_att
         def createDataFrame(self, rows, schema):
             assert schema == STATE_SCHEMA
             assert rows[0]["attempts"] == 3
+            # Giữ múi giờ để encoder Spark không diễn giải UTC thành giờ local của Python host.
+            assert rows[0]["updated_at"].utcoffset() == dt.timedelta(0)
             return spark.createDataFrame(rows, schema)
 
         def sql(self, text):

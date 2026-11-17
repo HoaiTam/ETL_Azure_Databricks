@@ -75,8 +75,7 @@ class SparkState:
         if not updates:
             return
         rows = [
-            {**row, "updated_at": dt.datetime.fromisoformat(row["updated_at"]).astimezone(dt.UTC).replace(tzinfo=None)}
-            for row in updates
+            {**row, "updated_at": dt.datetime.fromisoformat(row["updated_at"]).astimezone(dt.UTC)} for row in updates
         ]
         view = "off_updates_" + uuid.uuid4().hex
         self.spark.createDataFrame(rows, STATE_SCHEMA).createOrReplaceTempView(view)
