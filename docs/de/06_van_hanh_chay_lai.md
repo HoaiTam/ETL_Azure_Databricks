@@ -101,7 +101,8 @@ variables:
 
 ## 3. Event log và `ops.dq_results`
 
-Bổ sung vào cả hai pipeline (02 §2.2, 04 §3.1) để event log được lưu thành bảng UC. Người có quyền `SELECT` trên `ops` đọc được, không cần là chủ pipeline:
+Cấu hình publish event log UC của batch đã có trong bundle AD-DE-08. Stream dùng cùng schema ops
+và tên `event_log_stream` khi AD-ST-03 triển khai:
 
 ```yaml
       event_log:
@@ -110,45 +111,101 @@ Bổ sung vào cả hai pipeline (02 §2.2, 04 §3.1) để event log được l
         name: event_log_batch          # pipeline stream: event_log_stream
 ```
 
+### 3.1 Thu metrics bằng collect_dq
+
+[`src/tasks/collect_dq.sql`](../../src/tasks/collect_dq.sql) tạo bảng Delta thường `ops.dq_results`
+và MERGE metrics của **một update_id được chỉ định**. Bốn tham số STRING bắt buộc: `catalog`,
+`ops_schema`, `event_log_table` (chỉ event_log_batch hoặc event_log_stream), `update_id`.
+Chạy toàn bộ file cùng phiên SQL trên warehouse serverless, dùng đúng schema dev đã resolve.
+
+Không UNION tới bảng stream chưa có. Khi stream đã publish log, chạy lại **cùng file** với
+`event_log_table=event_log_stream` và update_id của stream. Hai nguồn ghi chung bảng đích.
+AD-DE-18 sẽ truyền tham số/update ID và điều phối SQL task; cần thu cả update lỗi (run_if phù hợp),
+không suy đoán update mới nhất khi một run khác đang chạy. Collector không tạo pipeline hay cấp quyền.
+
+| Cột | Hợp đồng |
+|---|---|
+| update_id | ID update từ origin |
+| pipeline | Ưu tiên origin.pipeline_id, fallback pipeline_name nếu nguồn cũ thiếu ID |
+| flow | origin.flow_name |
+| dataset | Tên từ chính expectation, fallback origin.dataset_name; không gộp các view trong cùng flow |
+| expectation | Tên luật |
+| passed / failed | BIGINT, tổng các bộ đếm quan sát trong event log cho luật đó |
+| at | TIMESTAMP_LTZ, thời điểm event metrics mới nhất, không phải lúc chạy collector |
+
+Khóa MERGE là **(pipeline, update_id, flow, dataset, expectation)**. Khóa ba cột của ví dụ cũ
+không phân biệt được một luật cùng tên trên nhiều dataset trong cùng flow; cũng không tách được pipeline.
+Bảng cũ nếu đã tạo theo hợp đồng khác cần audit khóa trùng trước chuyển đổi, không tự DELETE/overwrite lịch sử.
+
+Collector đọc origin/details JSON STRING hoặc STRUCT, giữ event flow_progress có maturity STABLE hoặc NULL.
+Nó cộng metrics ở **cả RUNNING lẫn COMPLETED**, vì nhiều streaming flow chỉ emit metrics trong micro-batch RUNNING.
+Cùng event ID/cùng nội dung được tính một lần; xung đột ID, thiếu khóa/counter/timestamp, số âm hoặc JSON sai
+làm MERGE fail, nguồn event log vẫn giữ nguyên. Không chuyển counter thiếu thành 0.
+
+Phạm vi là toàn bộ event còn giữ cho update_id, **không cắt lookback hai ngày giữa update**.
+Chạy lại không nhân dòng; event đến muộn bổ sung tổng của cùng khóa. Snapshot cũ có at nhỏ hơn được bỏ qua;
+nguồn cùng/mới hơn nhưng tổng giảm sẽ báo lỗi (điều tra retention hoặc nguồn chưa đầy đủ), không ghi đè kết quả cũ.
+Payload không đổi không ghi UPDATE. Đây không phải cơ chế archive: phải giữ đủ log của update khi thu lần đầu.
+
+### 3.2 Đọc số liệu đúng phạm vi
+
+- Metrics là số dòng đã đi qua **operator/expectation**, không phải số dòng cuối của bảng silver.
+  Một dòng có thể vi phạm nhiều luật; không cộng failed của mọi luật để suy ra số dòng quarantine.
+- View dùng bởi nhiều flow có thể emit nhiều bộ metrics. Đối chiếu đúng pipeline/update/flow/dataset và
+  cùng lô nguồn; không cộng xuyên flow hay so một update với toàn bộ quarantine tích lũy.
+- MV đánh giá snapshot có thể đếm lại toàn bộ dữ liệu ở mỗi update; streaming view đếm phần được xử lý.
+  Timestamp `_quarantined_at` không tự chứng minh cùng input population với metrics.
+- Khi expectation fail (`expect_or_fail` / `expect_all_or_fail`) dừng update do vi phạm,
+  nền tảng **không ghi metrics đếm**; xem ERROR/violation trong event log. Flow không có dữ liệu mới, không có expectation
+  hoặc operator không hỗ trợ có thể không emit metrics. Collector không dựng hàng zero giả cho các trường hợp này.
+- Mục tiêu “mọi expectation” được nghiệm thu bằng đối chiếu inventory: mọi metrics đã emit phải vào bảng,
+  luật fail/không emit cần được giải thích từ cấu hình và event log, không tuyên bố coverage 100% từ số hàng đếm.
+
+### 3.3 Truy vấn điều tra lưu sẵn
+
+Các câu sau chạy độc lập, nhận cùng tham số log/update. Chọn nguồn batch hoặc stream bằng event_log_table.
+
 ```sql
--- src/tasks/collect_dq.sql : MERGE theo (update_id, flow, expectation) → chạy lại không nhân dòng
-MERGE INTO instacart.ops.dq_results t
-USING (
-  SELECT origin.update_id                         AS update_id,
-         origin.pipeline_name                     AS pipeline,
-         origin.flow_name                         AS flow,
-         e.dataset, e.name                        AS expectation,
-         sum(e.passed_records)                    AS passed,
-         sum(e.failed_records)                    AS failed,
-         max(timestamp)                           AS at
-  FROM instacart.ops.event_log_batch
-  LATERAL VIEW explode(from_json(details:flow_progress.data_quality.expectations,
-      'array<struct<name:string,dataset:string,passed_records:bigint,failed_records:bigint>>')) x AS e
-  WHERE event_type = 'flow_progress' AND timestamp > current_timestamp() - INTERVAL 2 DAYS
-  GROUP BY ALL
-) s
-ON t.update_id = s.update_id AND t.flow = s.flow AND t.expectation = s.expectation
-WHEN MATCHED THEN UPDATE SET *
-WHEN NOT MATCHED THEN INSERT *;
+-- Lỗi và violation của update, gồm luật fail không có counter.
+WITH events AS (
+  SELECT timestamp, level, message, error,
+         get_json_object(to_json(named_struct('value', origin)), '$.value') AS o
+  FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:ops_schema, '`', '``')
+                  || '`.`' || replace(:event_log_table, '`', '``') || '`')
+)
+SELECT timestamp, get_json_object(o, '$.flow_name') AS flow, message, error
+FROM events WHERE level = 'ERROR' AND get_json_object(o, '$.update_id') = :update_id
+ORDER BY timestamp DESC;
+
+-- Status/output mỗi event, không lọc chỉ COMPLETED vì RUNNING có metrics.
+WITH events AS (
+  SELECT id, timestamp,
+    get_json_object(to_json(named_struct('value', origin)), '$.value') AS o,
+    get_json_object(to_json(named_struct('value', details)), '$.value') AS d
+  FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:ops_schema, '`', '``')
+                  || '`.`' || replace(:event_log_table, '`', '``') || '`')
+  WHERE event_type = 'flow_progress'
+)
+SELECT id, timestamp, get_json_object(o, '$.flow_name') AS flow,
+       get_json_object(d, '$.flow_progress.status') AS status,
+       try_cast(get_json_object(d, '$.flow_progress.metrics.num_output_rows') AS BIGINT) AS rows_out
+FROM events WHERE get_json_object(o, '$.update_id') = :update_id ORDER BY timestamp;
+
+-- Đọc kết quả thu theo từng dataset, tránh cộng lại luật trùng tên giữa các view.
+SELECT pipeline, pipeline_name, update_id, flow, dataset, expectation, passed, failed, at
+FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:ops_schema, '`', '``') || '`.`dq_results`')
+WHERE update_id = :update_id ORDER BY pipeline, flow, dataset, expectation;
 ```
 
-Bảng `ops.dq_results` tạo một lần với cột `update_id, pipeline, flow, dataset, expectation, passed, failed, at`.
+Đếm lý do quarantine bằng `explode(_dq_failed)` trên **cùng tập bản ghi nguồn cần so**. Mỗi lý do có
+số riêng, một bản ghi có thể có nhiều lý do; số dòng quarantine bằng số bản ghi lỗi duy nhất, không phải
+SUM failed qua các luật. Ví dụ ở AD-DE-12: warn assessed header đọc raw snapshot, canonical header có fail gate,
+orders_batch drop sau canonical; không lấy một tổng metrics của ba nơi để đối chiếu quarantine raw.
 
-Câu hỏi thường gặp khi điều tra:
-
-```sql
--- Update gần nhất lỗi ở flow nào, vì sao
-SELECT timestamp, origin.flow_name, level, message, error
-FROM instacart.ops.event_log_batch
-WHERE level = 'ERROR' ORDER BY timestamp DESC LIMIT 20;
-
--- Mỗi flow xử lý bao nhiêu dòng trong update gần nhất
-SELECT origin.flow_name, details:flow_progress.metrics.num_output_rows::bigint AS rows_out
-FROM instacart.ops.event_log_batch
-WHERE event_type = 'flow_progress' AND details:flow_progress.status = 'COMPLETED'
-  AND origin.update_id = (SELECT max_by(origin.update_id, timestamp)
-                          FROM instacart.ops.event_log_batch WHERE event_type = 'create_update');
-```
+Hướng dẫn chạy hai lần, kiểm dữ liệu xấu/counter thiếu, retention và chốt bằng chứng:
+[06b_nghiem_thu_dq.md](06b_nghiem_thu_dq.md). **Chưa nghiệm thu trên workspace**; #44/#48/#24/#22 còn là gate.
+Tham khảo [schema event log](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-log-schema),
+[metrics expectations](https://learn.microsoft.com/en-us/azure/databricks/ldp/expectations).
 
 ## 4. Đối soát tự động `ops.reconciliation`
 

@@ -92,5 +92,11 @@ Quyền đọc event log cho vai khác vẫn theo AD-OPS-20; không tự mở r�
 Xem kết quả validate, deploy, smoke update và đọc event log trên [issue AD-DE-08](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/44).
 Smoke update kiểm đường chạy của pipeline và event log. Đối soát dữ liệu ETL thực hiện ở các task bronze, silver và gold.
 
+AD-DE-16 có `src/tasks/collect_dq.sql`, nhận catalog/ops_schema/event_log_table/update_id,
+thu batch hoặc stream vào cùng bảng Delta `ops.dq_results`. Task chạy trên warehouse serverless,
+do AD-DE-18 tích hợp điều phối sau; không tạo job/cluster trong thay đổi này.
+Hợp đồng counters, khóa có dataset và cách nghiệm thu chạy hai lần/quarantine:
+[06b_nghiem_thu_dq.md](../docs/de/06b_nghiem_thu_dq.md). Đã kiểm Delta local, chưa kiểm warehouse/LDP thật.
+
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
