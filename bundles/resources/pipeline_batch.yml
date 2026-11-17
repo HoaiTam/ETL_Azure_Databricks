@@ -21,6 +21,8 @@ resources:
             cost_owner: p2
       configuration:
         landing_root: /Volumes/${var.catalog}/landing_meta/raw
+        off_root: ${var.off_root}
+        enable_off: ${var.enable_off}
         catalog: ${var.catalog}
         bronze: ${var.schema_prefix}bronze
         silver: ${var.schema_prefix}silver
