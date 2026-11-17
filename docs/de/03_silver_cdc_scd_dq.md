@@ -348,81 +348,67 @@ Số liệu đạt/bị loại theo từng luật được lấy từ **event lo
 
 ## 5. Làm giàu từ Open Food Facts: làm phẳng JSON và fuzzy match
 
-File này là **notebook** (định dạng `.py` có header `# Databricks notebook source`). Lý do: LDP cho phép `%pip install` ở ô đầu của notebook, còn file Python thuần thì không.
+Triển khai ở [`silver_off.py`](../../src/pipelines/batch/silver_off.py), notebook source `.py`
+có `%pip install rapidfuzz==3.14.6` ở ô đầu. Cấu hình glob của `instacart_batch` đã nạp thư mục này;
+không cần tạo pipeline hay cluster mới. Logic trả DataFrame nằm ở
+[`common/off.py`](../../src/common/off.py), dùng lại `norm` từ `common/text.py` của AD-DE-02.
+Không gọi API, cài package hoặc ghi bảng bên trong hàm định nghĩa dataset.
 
-```python
-# Databricks notebook source
-# MAGIC %pip install rapidfuzz==3.*
+### 5.1 Làm phẳng và chọn phiên bản
 
-# COMMAND ----------
-# src/pipelines/batch/silver_off.py
-import pandas as pd
-from pyspark import pipelines as dp
-from pyspark.sql import functions as F, types as T
-from pyspark.sql.window import Window
+- Đọc batch từ `bronze.off_products` (mỗi dòng JSONL là một hit của AD-DE-10).
+  `_product_id` trở thành `product_id` INT, `code` thành `off_code` STRING để giữ số 0 đầu.
+- `brands` nhận chuỗi phân cách dấu phẩy hoặc mảng; đầu ra `brand` là chuỗi.
+  Tags nhận mảng hoặc chuỗi phân cách dấu phẩy/JSON array; trường thiếu thành mảng rỗng.
+- Nutriments nhận MAP theo schema hint bronze hoặc STRUCT có trường thưa; trích
+  `energy-kcal_100g`, `sugars_100g`, `fat_100g` thành ba cột DOUBLE. Trường thiếu hay
+  số không parse được nhận NULL qua `try_cast`, kể cả ANSI mode. `nova_group` là INT.
+  Không suy diễn giá trị dinh dưỡng hoặc chuẩn hóa đơn vị ngoài hợp đồng trên 100g của nguồn.
+- `OFF_RULES` kiểm khóa dương, mã vạch 1–32 chữ số, ingest timestamp hợp lệ và rescue NULL.
+  `silver.quarantine_off_products` giữ mọi raw payload cùng metadata, toàn bộ tên luật lỗi
+  và `_quarantined_at`, **trước** khử trùng. Đây là MV theo snapshot bronze, không append lặp mỗi update.
+- `silver.off_products_clean` chỉ lấy bản đạt các luật trên, mới nhất theo `_ingest_ts`
+  cho mỗi `(product_id, off_code)`. Phá hòa bằng SHA-256 raw; chạy lại cùng snapshot không đổi lựa chọn.
+  Nếu bản mới lỗi khóa/ingest/rescue, nó vào quarantine và bản cũ hợp lệ vẫn được dùng.
+  Hash chỉ giúp chọn tất định, không xác nhận đâu là nội dung nghiệp vụ đúng khi cùng timestamp.
+- `has_name` là expectation warn: tên rỗng/NULL vẫn giữ, nhưng scorer trả 0.
+  Trường dinh dưỡng tùy chọn có thể NULL; dữ liệu gốc vẫn còn ở bronze.
 
-from common.text import norm
+### 5.2 Chọn ứng viên và chấm điểm
 
-CAT    = spark.conf.get("catalog")
-BRONZE = f"{CAT}.{spark.conf.get('bronze')}"
-SILVER = f"{CAT}.{spark.conf.get('silver')}"
+1. Danh mục gốc là **toàn bộ** `bronze.products`, khử trùng `product_id` theo ingest mới nhất,
+   rồi tên tăng dần khi hòa; nguồn Instacart là release bất biến. Key không hợp lệ làm flow
+   `product_off_match` fail qua expectation, không âm thầm loại sản phẩm.
+2. Chỉ xét hit của **đúng** `product_id` do crawler gắn, có `countries_tags` chứa chính xác
+   `en:united-states`. Không cross join cả danh mục Instacart và OFF.
+3. LEFT JOIN để giữ cả sản phẩm chưa crawl, không có kết quả hoặc chỉ có kết quả ngoài Mỹ.
+   Khác ví dụ INNER JOIN cũ, bảng cầu nối luôn có một dòng cho mỗi khóa sản phẩm nguồn.
+4. Pandas UDF dùng `rapidfuzz.token_set_ratio(norm(ic_name), norm(off_name))`.
+   Cộng 5 nếu thương hiệu đầu tiên xuất hiện nguyên cụm từ trong tên Instacart đã chuẩn hóa;
+   chặn trên 100. Tên sau chuẩn hóa rỗng nhận 0, không cộng bonus. Không làm tròn điểm trước phân nhãn.
+5. Chọn điểm cao nhất rồi `off_code` tăng dần khi hòa. Từ 85: `matched`; từ 70 đến dưới 85:
+   `low_confidence`; dưới 70: `no_match`. Khi không có ứng viên, mã NULL và điểm 0.
+   Nếu có ứng viên nhưng điểm thấp thì vẫn giữ mã/điểm để kiểm tra, gắn `no_match`.
+6. Đầu ra chỉ có `product_id, off_code, off_match_score, off_match_status`.
+   Expectations fail kiểm key, miền điểm và nhãn tương ứng. Chỉ `matched` được làm giàu BI
+   ở AD-DE-14; `low_confidence`/`no_match` không được dùng để gắn thương hiệu hay dinh dưỡng.
 
+`token_set_ratio` có thể cho 100 khi tên này chứa toàn bộ token của tên kia; đây là heuristic,
+không phải xác suất hai sản phẩm giống nhau. Cần kiểm tay một mẫu sau khi có dữ liệu thật.
+Xem [RapidFuzz](https://rapidfuzz.github.io/RapidFuzz/Usage/fuzz.html#token-set-ratio) và
+[pandas UDF trên Spark](https://spark.apache.org/docs/3.5.7/api/python/user_guide/sql/arrow_pandas.html#pandas-udfs-a-k-a-vectorized-udfs).
 
-@dp.materialized_view(name=f"{SILVER}.off_products_clean",
-                      comment="OFF đã làm phẳng; mỗi (_product_id, code) một dòng mới nhất")
-@dp.expect("has_name", "off_product_name IS NOT NULL")
-def off_products_clean():
-    return (spark.read.table(f"{BRONZE}.off_products")
-            .select(
-                F.col("_product_id").cast("int").alias("product_id"),
-                F.col("code").alias("off_code"),
-                F.col("product_name").alias("off_product_name"),
-                F.concat_ws(",", "brands").alias("brand"),
-                "categories_tags", "countries_tags", "nutriscore_grade", "nova_group",
-                F.col("nutriments")["energy-kcal_100g"].cast("double").alias("energy_kcal_100g"),
-                F.col("nutriments")["sugars_100g"].cast("double").alias("sugars_100g"),
-                F.col("nutriments")["fat_100g"].cast("double").alias("fat_100g"),
-                "image_url", "_ingest_ts")
-            .withColumn("rn", F.row_number().over(
-                Window.partitionBy("product_id", "off_code").orderBy(F.col("_ingest_ts").desc())))
-            .where("rn = 1").drop("rn"))
+### 5.3 Kiểm và nghiệm thu
 
+`uv run pytest tests/test_off.py tests/test_norm.py -q` kiểm flatten, ANSI, thiếu trường,
+quarantine, replay, phá hòa, quốc gia, đủ sản phẩm và thực thi pandas UDF qua Arrow worker.
+PyArrow trong dev dependencies phục vụ Spark local; notebook dùng Arrow/pandas của runtime LDP.
+Test đăng ký `dp` giả lập không thay cho update pipeline trên workspace.
 
-@F.pandas_udf(T.DoubleType())
-def match_score(ic_name: pd.Series, off_name: pd.Series, brand: pd.Series) -> pd.Series:
-    from rapidfuzz import fuzz
-    out = []
-    for a, b, br in zip(ic_name, off_name, brand):
-        s = fuzz.token_set_ratio(norm(a), norm(b))
-        if br and norm(br.split(",")[0]) and norm(br.split(",")[0]) in norm(a):
-            s += 5
-        out.append(float(min(s, 100)))
-    return pd.Series(out)
-
-
-@dp.materialized_view(name=f"{SILVER}.product_off_match",
-                      comment="Bảng cầu nối Instacart ↔ OFF: ứng viên tốt nhất mỗi product_id")
-@dp.expect("has_score", "off_match_score IS NOT NULL")
-def product_off_match():
-    p = spark.read.table(f"{BRONZE}.products").select("product_id", "product_name").dropDuplicates(["product_id"])
-    c = (spark.read.table(f"{SILVER}.off_products_clean")
-         .where(F.array_contains("countries_tags", "en:united-states")))
-    scored = (p.join(c, "product_id")
-               .withColumn("off_match_score", match_score("product_name", "off_product_name", "brand")))
-    w = Window.partitionBy("product_id").orderBy(F.col("off_match_score").desc(), "off_code")
-    return (scored.withColumn("rn", F.row_number().over(w)).where("rn = 1")
-            .withColumn("off_match_status",
-                        F.when(F.col("off_match_score") >= 85, "matched")
-                         .when(F.col("off_match_score") >= 70, "low_confidence")
-                         .otherwise("no_match"))
-            .select("product_id", "off_code", "off_match_score", "off_match_status"))
-```
-
-Hàm `norm` ở `src/common/text.py` có test (`tests/test_norm.py`) với 4 cặp tên ở
-[data_dictionary §5.6](../data/data_dictionary.md). Notebook chỉ import lại hàm đó.
-Hàm bỏ từ nhiễu/số đo trước khi bỏ dấu câu để `12.5 oz` không để lại `12`,
-nhận đơn vị ghép `fl oz`, rồi chuẩn hóa khoảng trắng và cụm `bag-of`.
-Đây là chuẩn hóa tên, chưa quyết định hai sản phẩm có khớp nhau; ngưỡng fuzzy vẫn áp dụng ở bước sau.
+Cách chạy dev, lấy đủ ba nhãn, mẫu số và ghi tỉ lệ thật:
+[03d_nghiem_thu_off.md](03d_nghiem_thu_off.md). **Chưa đo tỉ lệ thật** ở AD-DE-13;
+không dùng tỉ lệ từ fixture làm coverage của Instacart. AD-DE-10 (#46) chưa được nghiệm thu,
+AD-DE-02 (#38) đã đóng. `dim_product` thuộc AD-DE-14.
 
 ## 6. `dim_product`: join nhiều nguồn mà không nhân dòng
 

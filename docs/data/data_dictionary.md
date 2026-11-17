@@ -363,7 +363,22 @@ File gốc để sửa: [product_enrichment_join.drawio](product_enrichment_join
 | Organic Strawberries                 | Yaourt fraise biologique (sữa chua Pháp) | Sai                      |
 | Bag of Organic Bananas               | Plastic Bag                                | Sai                      |
 
-Tỉ lệ khớp thực tế **chưa đo**, cần làm trong giai đoạn spike. Tỉ lệ thấp vẫn chấp nhận được, miễn là báo cáo trung thực.
+**Trạng thái AD-DE-13 (2026-11-17): tỉ lệ khớp thực tế chưa đo.** Chưa có lô OFF thật đã
+được nghiệm thu qua bronze và chưa chạy pipeline trên workspace; AD-DE-10 (#46) còn mở.
+Không thay số thật bằng fixture hoặc bốn ví dụ trên.
+
+Bảng cầu nối giữ **một dòng cho mỗi `product_id` Instacart**, kể cả chưa crawl/chỉ có hit ngoài Mỹ:
+những sản phẩm đó nhận `off_code=NULL`, `off_match_score=0`, `off_match_status=no_match`.
+Ứng viên dưới 70 vẫn giữ mã/điểm với nhãn `no_match` để kiểm tra. Khi bằng điểm, chọn mã OFF tăng dần.
+Ngưỡng 85/70 áp dụng trên điểm DOUBLE chưa làm tròn. Bonus 5 điểm chỉ dùng thương hiệu đầu tiên
+xuất hiện nguyên cụm từ trong tên Instacart, chặn trên 100; tên chuẩn hóa rỗng luôn nhận 0.
+
+Khi có dữ liệu thật, ghi **đủ ba nhãn** (`matched`, `low_confidence`, `no_match`, kể cả nhãn có 0 dòng)
+và tỉ lệ với mẫu số là **toàn bộ bảng cầu nối** (49.688 sản phẩm nếu dùng release đầy đủ).
+Báo riêng số sản phẩm đã crawl/đủ ứng viên Mỹ để phân biệt độ phủ crawler với chất lượng ghép;
+không suy ra `no_match` nghĩa là đã tra nhưng không thấy. Lưu commit, pipeline/update ID,
+nguồn bronze/phiên bản và thời điểm đo. Hướng dẫn lấy số và đối soát tại
+[nghiệm thu OFF](../de/03d_nghiem_thu_off.md). Tỉ lệ thấp vẫn chấp nhận được nếu báo cáo trung thực.
 
 ### 5.7 Làm giàu được những gì
 
