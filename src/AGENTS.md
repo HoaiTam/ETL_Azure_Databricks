@@ -36,6 +36,20 @@
 - Chạy từ gốc repo: `uv run pytest tests/test_sim_time.py tests/test_norm.py -q`.
   Script Python chạy trực tiếp cần `PYTHONPATH=src` để import `common`.
 
+## Chất lượng dữ liệu dùng chung (AD-DE-03)
+
+- `common.dq` chứa duy nhất `ORDER_RULES`, `ITEM_RULES`, `PRICE_RULES`, `PROMO_RULES`, `EVENT_RULES`.
+  Import cùng dict cho expectations và quarantine để tên luật, điều kiện không bị lệch.
+- `df.withColumn("_dq_failed", dq_failed(RULES))` tạo `array<string>` tên mọi luật lỗi theo thứ tự dict;
+  dòng đạt hoặc dict rỗng nhận `[]`. Lọc `size(_dq_failed) > 0` khi tạo bảng quarantine.
+- Điều kiện không được trả NULL. `dq_failed` coi NULL từ luật tùy chỉnh là lỗi; SQL sai/cột thiếu
+  vẫn phải báo lỗi. Khoảng cách đơn đầu rỗng và `_rescued_data IS NULL` là các trường hợp hợp lệ.
+- Helper không phụ thuộc `pyspark.pipelines`, không khởi tạo session, không chạy action/ghi bảng.
+  Cần SparkSession đang chạy khi dựng biểu thức; kiểm được bằng PySpark 3.5 local[1].
+- Dữ liệu đầu vào phải có đủ cột đúng kiểu theo luật; parse/cast thuộc bước trước expectations.
+  Ví dụ dùng trên pipeline nằm ở `docs/de/03` §4 và `docs/de/04` §4.1.
+- Kiểm tra: `uv run pytest tests/test_dq.py -q`.
+
 ## Dữ liệu mẫu cho phát triển local
 
 - Fixture nhỏ tự dựng ở `tests/fixtures/instacart/`, gồm đủ sáu CSV; không phải dữ liệu thật.

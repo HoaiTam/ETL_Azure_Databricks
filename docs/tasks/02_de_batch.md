@@ -177,8 +177,27 @@ Expectations chỉ đếm dòng bị bỏ. Bảng quarantine_* giữ nội dung 
 
 **Xong khi**
 
-- [ ] uv run pytest tests/test_dq.py xanh
-- [ ] Mỗi bộ luật có ít nhất một ca đạt và một ca lỗi trong test
+- [x] uv run pytest tests/test_dq.py xanh
+- [x] Mỗi bộ luật có ít nhất một ca đạt và một ca lỗi trong test
+
+**Kết quả local AD-DE-03 (2026-11-17)**
+
+- `src/common/dq.py` tập trung 5 bộ luật (18 điều kiện), dùng chung cho expectations và quarantine.
+  `dq_failed()` trả `array<string>` tên luật lỗi theo thứ tự khai báo; NULL từ luật tùy chỉnh là lỗi,
+  dòng đạt hoặc dict rỗng nhận `[]`. Hàm không phụ thuộc `dp`, không chạy action hay ghi bảng.
+- 15 test DQ kiểm từng luật cả đạt/lỗi, biên, NULL trên hai chế độ ANSI; kiểm cấu hình sai,
+  giữ nguyên dòng/payload JSON hỏng và chạy biểu thức trên Structured Streaming local.
+- Toàn bộ nhánh đạt **50 test** trên Python 3.11.9, PySpark 3.5, Java 17;
+  `uv sync --frozen`, `ruff check .`, `ruff format --check .` đều đạt.
+- Áp dụng ORDER/ITEM_RULES trên mẫu thật `data/sample_1pct/`: **34.538 đơn,
+  326.492 dòng món prior, 13.665 dòng món train**, không có dòng vi phạm.
+  Đọc CSV bằng schema tường minh, bổ sung `_rescued_data = NULL` cho nguồn CSV sạch;
+  báo cáo ở `data/ad_de_03_verification.json`, toàn bộ `data/` đã gitignore.
+- Đã cập nhật ví dụ batch/stream dùng cùng bộ luật và helper; quarantine sự kiện giữ `value_json`.
+  Chưa triển khai pipeline silver thật (AD-DE-11/12, AD-ST-05); **chưa kiểm trên workspace**
+  vì máy chưa có Databricks CLI/cấu hình workspace.
+- Hoàn tất kiểm tra local G0; phụ thuộc AD-DE-01 đã được merge qua PR #135.
+  Nhánh AD-DE-03 đã đồng bộ main sau #135, độc lập với AD-DE-02 (#137).
 
 ### AD-DE-04
 
