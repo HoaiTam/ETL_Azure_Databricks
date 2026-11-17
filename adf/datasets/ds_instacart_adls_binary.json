@@ -1,0 +1,42 @@
+{
+  "name": "ds_instacart_adls_binary",
+  "properties": {
+    "linkedServiceName": {
+      "referenceName": "ls_adls",
+      "type": "LinkedServiceReference"
+    },
+    "parameters": {
+      "file_system": {
+        "type": "String",
+        "defaultValue": "landing"
+      },
+      "folder_path": {
+        "type": "String",
+        "defaultValue": ""
+      },
+      "file_name": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "type": "Binary",
+    "typeProperties": {
+      "location": {
+        "type": "AzureBlobFSLocation",
+        "fileSystem": {
+          "value": "@dataset().file_system",
+          "type": "Expression"
+        },
+        "folderPath": {
+          "value": "@dataset().folder_path",
+          "type": "Expression"
+        },
+        "fileName": {
+          "value": "@dataset().file_name",
+          "type": "Expression"
+        }
+      }
+    },
+    "schema": []
+  }
+}

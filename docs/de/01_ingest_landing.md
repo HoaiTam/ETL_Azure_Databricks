@@ -36,31 +36,41 @@ Copy activity bị đứt giữa chừng sẽ để lại **file dở dang**. N�
 - Thư mục đích là `release=2017`, cố định.
 - Nếu đã có `_SUCCESS` thì bỏ qua hẳn bảng đó.
 
-```
-ForEach table in ["orders","order_products__prior","order_products__train","products","aisles","departments"]
-  ├─ Get Metadata  landing/instacart/<t>/release=2017/_SUCCESS  (field: exists)
-  └─ If Condition  not(exists)
-       ├─ Copy  HTTP (Zenodo) → _staging/instacart/<t>/  [DelimitedText → DelimitedText]
-       ├─ If    rowsCopied != expected_rows[t]  → Fail activity "row count mismatch"
-       ├─ Copy  _staging/... → instacart/<t>/release=2017/<t>.csv  [Binary]
-       ├─ Delete _staging/instacart/<t>/
-       └─ Copy  template ops/_SUCCESS (file 0 byte) → instacart/<t>/release=2017/_SUCCESS
-```
+Code thực thi chuẩn bị ở [adf/README.md](../../adf/README.md), gồm mảng activities của
+`pl_ingest_instacart` và pipeline con `pl_ingest_instacart_table`, settings tham số/concurrency,
+cùng hợp đồng ba dataset cho P1 triển khai qua `40-orchestration`.
 
-Tham số pipeline `expected_rows` dùng để kiểm số dòng **trước khi công bố**:
+1. Pipeline cha ForEach tuần tự sáu bảng, Get Metadata `_SUCCESS`, If chưa có marker thì gọi pipeline con.
+2. Pipeline con kiểm template marker 0 byte, Copy HTTP CSV → `_staging` với mapping tường minh.
+3. If `rowsRead` và `rowsCopied` đều bằng expected_rows thì Binary publish → Delete staging → Copy `_SUCCESS`.
+   Sai số dòng thì Fail; thiếu trường output cũng là lỗi, không tự coi là đạt.
+4. Kiểm marker thực sự tồn tại sau Copy; pipeline cha chỉ hoàn tất khi mọi bảng đã hoàn tất/bỏ qua hợp lệ.
+
+Không đặt If kiểm số dòng bên trong If chưa có marker: ADF không cho lồng If trong If.
+Dùng Execute Pipeline để chia scope; `waitOnCompletion = true`, concurrency 1 cho cả cha/con.
+Auto Loader chỉ chạy sau khi cha thành công, không đọc trong lúc công bố file.
+
+Tham số `expected_rows` giữ các số đếm **không gồm header**:
 
 ```json
 {"orders": 3421083, "order_products__prior": 32434489, "order_products__train": 1384617,
  "products": 49688, "aisles": 134, "departments": 21}
 ```
 
-- Copy DelimitedText đếm số dòng **dữ liệu**, không tính header. Số trên lấy theo bản Kaggle; nếu bản Zenodo khác thì sửa tham số sau khi kiểm bằng `wc -l` ([data_dictionary](../data/data_dictionary.md)).
+Provider Terraform nhận parameter map(string), nên giá trị trên được mã hóa thành String JSON;
+ADF đọc bằng `json()`. Cùng cách đó cho `tables_json` và `mappings_json`, settings nằm cạnh activities.
 
-**Nguồn và cấu hình Copy (kết quả spike 3.5, [spike_results](../devops/spike_results.md)):**
-- **URL:** record Zenodo [2654444](https://zenodo.org/records/2654444) có đủ 6 file CSV **không nén**. Dataset HTTP dùng đường dẫn tương đối `api/records/2654444/files/<t>.csv/content` trên `ls_zenodo` (base URL `https://zenodo.org/`). Không cần `ZipDeflate`.
-- **Phải khai mapping cột tường minh.** Copy DelimitedText → DelimitedText cùng định dạng mà không có mapping thì ADF chép nguyên file và **không trả `rowsCopied`**, làm bước kiểm số dòng ở trên không chạy được. Mỗi bảng khai `translator` kiểu `TabularTranslator` có `mappings` liệt kê đủ cột theo [data_dictionary](../data/data_dictionary.md). Lần spike đạt có kèm `quoteAllText = true` ở sink và chưa tách riêng yếu tố nào quyết định, nên giữ cả hai.
-- **Retry trên activity Copy:** Zenodo có lúc trả HTTP 503 khi bảo trì (gặp sáng 2026-11-17). Đặt `policy.retry = 3`, `retryIntervalInSeconds = 300`. Copy ghi vào `_staging`, nên chạy lại không làm bẩn landing.
-- **Chưa kiểm:** thời gian copy `order_products__prior.csv` (khoảng 578 MB). Đặt `policy.timeout` của activity này rộng (ví dụ `0.02:00:00`) và ghi thời gian thật vào báo cáo.
+- **Đã kiểm nguồn thật 2026-11-17:** MD5/header/số bản ghi CSV và `wc -l` trừ header của sáu file
+  đều khớp catalog `adf/instacart_sources.json`; số đếm không cần đổi so với data dictionary.
+- **Theo spike #141:** Zenodo record 2654444 có CSV không nén, dùng đường dẫn
+  `api/records/2654444/files/<file>.csv/content`, không đặt ZipDeflate cho nguồn này.
+- DelimitedText → DelimitedText không mapping có thể chép nguyên file và thiếu `rowsCopied`.
+  Vì vậy Copy dùng `TabularTranslator.mappings` đủ cột và `quoteAllText = true` như spike;
+  giữ các cột dạng String, quote/escape theo CSV chuẩn và UTF-8 không BOM.
+- Binary publish/marker bật consistency verification với PreserveHierarchy; không bật kiểm này cho HTTP
+  vì connector không hỗ trợ. Copy/Metadata/Delete retry 5 lần khi lỗi tạm thời, nghỉ 60 giây.
+- **Chưa nghiệm thu Azure:** AD-OPS-25 còn mở; JSON đã kiểm local/SDK, chưa export/debug từ Studio
+  hay có sáu thư mục landing thật. Checklist chạy lần đầu/lần hai nằm ở `adf/README.md`.
 
 ## 3. Azure SQL: CDC thật theo LSN (`pl_ingest_retail_db`)
 
