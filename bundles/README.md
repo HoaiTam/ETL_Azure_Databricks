@@ -22,10 +22,10 @@ CI deploy dev bằng SP CI nên `<user>` khi đó là short name của SP, khác
 - `bootstrap.py` tạo một materialized view **private** `_batch_bootstrap`, đúng một dòng
   cấu hình, không công bố bảng nghiệp vụ vào UC và không đọc landing. Nó giúp update smoke
   và event log có đồ thị chạy trước khi có bronze. Không dùng kết quả này để xác nhận ETL.
-- `bronze.py` (AD-DE-09) nạp sáu bảng CSV Instacart từ landing. Update pipeline
-  chạy cả bronze và smoke, với dữ liệu đã công bố cùng quyền đọc volume raw.
-  Xem [nghiệm thu bronze](../docs/de/02b_nghiem_thu_bronze.md). Silver, gold, thu thập DQ
-  và job điều phối thuộc các task sau.
+- `bronze.py` (AD-DE-09) nạp sáu bảng CSV Instacart từ landing.
+  Xem [nghiệm thu bronze](../docs/de/02b_nghiem_thu_bronze.md).
+- `silver_instacart.py` (AD-DE-12) thêm clock, header batch, AUTO CDC món prior và hai quarantine;
+  pipeline đặt session UTC. Xem [nghiệm thu đơn hàng](../docs/de/03c_nghiem_thu_orders.md).
   `warehouse_id` đã khai báo cho AD-DE-18, pipeline hiện tại không dùng warehouse.
 - Schema prod, catalog, volume, warehouse, policy và quyền do Terraform/P1 quản lý.
   Schema dev tạo một lần bằng DDL bên dưới; bundle cleanup không sở hữu/xóa bốn schema này.
