@@ -22,6 +22,17 @@ variables:
     description: Cluster policy single-node (tạo ở 30-databricks), tra theo tên
     lookup:
       cluster_policy: instacart-single-node
+  pipeline_policy_id:
+    description: Policy riêng loại dlt cho pipeline (AD-OPS-21), không dùng policy job cluster
+    lookup:
+      cluster_policy: instacart-pipeline-single-node
+  schema_prefix:
+    description: Tiền tố schema; dev riêng từng người, prod không có tiền tố
+    default: ""
+  warehouse_id:
+    description: Serverless SQL warehouse cho các task vận hành (AD-DE-18)
+    lookup:
+      warehouse: wh-instacart-bi
   node_type_id:
     description: Máy của job cluster, phải trùng giá trị fixed trong policy (docs/devops/05 §3 bước 6)
     default: Standard_D4ds_v4
@@ -33,6 +44,15 @@ targets:
   dev:
     mode: development # tiền tố [dev <user>], tạm dừng schedule
     default: true
+    variables:
+      schema_prefix: ${workspace.current_user.short_name}_
+    resources:
+      pipelines:
+        instacart_batch:
+          development: true
+          configuration:
+            pipelines.numUpdateRetryAttempts: "0"
+            pipelines.maxFlowRetryAttempts: "0"
 
   prod:
     mode: production

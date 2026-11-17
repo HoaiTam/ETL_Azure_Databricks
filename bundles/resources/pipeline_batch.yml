@@ -1,0 +1,38 @@
+# Classic single-node theo chốt G0; runtime do channel quản lý, không đặt spark_version.
+resources:
+  pipelines:
+    instacart_batch:
+      name: instacart-batch
+      catalog: ${var.catalog}
+      schema: ${var.schema_prefix}bronze
+      edition: ADVANCED
+      channel: CURRENT
+      serverless: false
+      continuous: false
+      development: false # target dev ghi đè; prod giữ cơ chế retry mặc định của nền tảng
+      photon: false
+      clusters:
+        - label: default
+          policy_id: ${var.pipeline_policy_id}
+          node_type_id: ${var.node_type_id}
+          num_workers: 0
+          custom_tags:
+            owner: p2
+      configuration:
+        landing_root: /Volumes/${var.catalog}/landing_meta/raw
+        catalog: ${var.catalog}
+        bronze: ${var.schema_prefix}bronze
+        silver: ${var.schema_prefix}silver
+        gold: ${var.schema_prefix}gold
+        ops: ${var.schema_prefix}ops
+        as_of_date: "2026-03-30"
+        pipelines.clusterShutdown.delay: 60s
+      event_log:
+        catalog: ${var.catalog}
+        schema: ${var.schema_prefix}ops
+        name: event_log_batch
+      # Đưa src vào sys.path để các tầng sau import common, không nạp pipeline stream.
+      root_path: ../../src
+      libraries:
+        - glob:
+            include: ../../src/pipelines/batch/**

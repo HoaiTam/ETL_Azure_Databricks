@@ -16,7 +16,10 @@
 - **Trạng thái G0:** AD-DE-01 đã bỏ job Python tạm. `resources/jobs_batch.yml` có `jobs: {}`,
   chưa tạo job batch trên workspace. Không deploy khung này lên môi trường đã có job prod.
 - **Việc còn treo:** `docs/de` dùng Lakeflow Declarative Pipelines (`instacart_batch`, `instacart_stream`).
-  - AD-DE-08 thêm `resources/pipeline_batch.yml`; AD-ST-03 khai báo pipeline stream.
+  - AD-DE-08 có `resources/pipeline_batch.yml`, hướng dẫn tạo schema và nghiệm thu ở `README.md`.
+    Glob chỉ nạp `src/pipelines/batch/`; `bootstrap.py` là smoke private, không thay thế ETL nghiệp vụ.
+    Không thêm schema dev thành resource DAB để cleanup không xóa schema dùng chung của người chạy.
+  - AD-ST-03 khai báo pipeline stream.
   - AD-DE-18 bổ sung job `instacart-batch-medallion` dùng `pipeline_task` và các task vận hành.
 
 ## Job seed (AD-DE-05)

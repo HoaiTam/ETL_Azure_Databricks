@@ -1,0 +1,93 @@
+# Bundle Instacart — nghiệm thu pipeline batch (AD-DE-08)
+
+`resources/pipeline_batch.yml` khai báo `instacart_batch`: classic single-node theo G0,
+edition Advanced, channel Current, chạy triggered, không Photon. Policy riêng
+`instacart-pipeline-single-node` và biến máy phải khớp AD-OPS-21. Runtime do pipeline
+quản lý, không gắn DBR của job vào pipeline. Cluster tắt sau 60 giây kể từ khi update xong;
+không chạy đồng thời với job khác dùng quota 4 vCPU. SQL warehouse vẫn là serverless.
+
+| Target | Tên pipeline | Schema mặc định | Event log |
+|---|---|---|---|
+| dev | `[dev <user>] instacart-batch` | `<user>_bronze` | `<catalog>.<user>_ops.event_log_batch` |
+| prod | `instacart-batch` | `bronze` | `<catalog>.ops.event_log_batch` |
+
+Dev dùng `${workspace.current_user.short_name}_`, bật development và tắt retry update/flow
+để lỗi cấu hình dừng sớm. Prod giữ retry mặc định và chạy bằng SP CI như cấu hình chung.
+CI deploy dev bằng SP CI nên `<user>` khi đó là short name của SP, khác prefix local.
+
+## Phạm vi hiện tại
+
+- Glob chỉ nạp source trong `src/pipelines/batch/`; `root_path` là `src/` để import `common`.
+  Khi các task sau thêm Python/SQL/notebook vào batch, chúng nằm trong glob này.
+- `bootstrap.py` tạo một materialized view **private** `_batch_bootstrap`, đúng một dòng
+  cấu hình, không công bố bảng nghiệp vụ vào UC và không đọc landing. Nó giúp update smoke
+  và event log có đồ thị chạy trước khi có bronze. Không dùng kết quả này để xác nhận ETL.
+- Bronze, silver, gold nghiệp vụ, thu thập DQ và job điều phối thuộc các task sau.
+  `warehouse_id` đã khai báo cho AD-DE-18, pipeline hiện tại không dùng warehouse.
+- Schema prod, catalog, volume, warehouse, policy và quyền do Terraform/P1 quản lý.
+  Schema dev tạo một lần bằng DDL bên dưới; bundle cleanup không sở hữu/xóa bốn schema này.
+
+## Trước khi chạy dev
+
+1. AD-OPS-19 (#21), AD-OPS-20 (#22), AD-OPS-21 (#23) phải được nghiệm thu: có catalog,
+   managed storage, volume raw, hai policy `instacart-single-node` / `instacart-pipeline-single-node`
+   và warehouse `wh-instacart-bi` để các lookup của bundle resolve được.
+2. Có Databricks CLI hiện hành và đăng nhập bằng **profile người chạy đã chọn**. Không tự lấy
+   profile đầu tiên. Cài/đăng nhập theo `databricks-core` hoặc `/databricks:setup` nếu còn thiếu.
+3. Danh tính deploy/run có `USE CATALOG`, `CREATE SCHEMA` trên catalog; trên các schema dev
+   cần `USE SCHEMA`, `CREATE TABLE`, `CREATE MATERIALIZED VIEW`. Tạo schema dưới cùng danh tính
+   giúp người chạy sở hữu schema. Landing cần `READ VOLUME` khi các tầng sau bắt đầu đọc nguồn.
+   Nếu CI dùng prefix riêng của SP, chuẩn bị schema và quyền cho SP trước deploy CI.
+
+## Tạo schema và kiểm tra
+
+Các lệnh bundle dưới đây chạy trong `bundles/`. Thay `<profile>` bằng profile đã chọn:
+
+```bash
+databricks bundle validate --strict -t dev --profile <profile> -o json
+```
+
+Đọc `schema_prefix` đã resolve trong cấu hình (đúng short name của danh tính deploy).
+Ví dụ prefix đã resolve là `p2_`, chạy từ gốc repo:
+
+```bash
+python3 scripts/dev_schema_sql.py --catalog instacart --schema-prefix p2_ > /tmp/dev-schemas.sql
+```
+
+Chạy nội dung SQL vừa tạo trong SQL editor trên warehouse `wh-instacart-bi`, bằng đúng
+danh tính deploy. Script chỉ in bốn câu `CREATE SCHEMA IF NOT EXISTS`, không kết nối cloud,
+không cấp quyền và từ chối prefix rỗng. Nếu đổi catalog/prefix qua `--var` hoặc `BUNDLE_VAR_*`,
+phải dùng cùng giá trị lúc validate, tạo schema, deploy và run.
+
+Sau khi tạo schema, quay lại `bundles/`:
+
+```bash
+databricks bundle validate --strict -t dev --profile <profile>
+databricks bundle deploy -t dev --profile <profile>
+databricks bundle run -t dev --profile <profile> instacart_batch
+```
+
+Kiểm tên pipeline, schema mặc định, policy, số worker và event log trong cấu hình đã resolve
+trước deploy. Chỉ chạy update khi không có job/pipeline khác chiếm quota. Trong SQL editor,
+thay `p2_ops` bằng schema đã resolve:
+
+```sql
+SELECT timestamp, event_type, level, message
+FROM instacart.p2_ops.event_log_batch
+ORDER BY timestamp DESC
+LIMIT 20;
+```
+
+Ghi lại pipeline ID, update ID, trạng thái update, tên đầy đủ event log và kết quả query trên
+issue #44. Event log chỉ được xác nhận sau update thành công; validate/deploy không đủ.
+Quyền đọc event log cho vai khác vẫn theo AD-OPS-20; không tự mở rộng grant ở bundle.
+
+## Trạng thái nghiệm thu
+
+Đã có cấu hình và kiểm tra local của phần smoke/DDL. **Chưa kiểm** `bundle validate`,
+`bundle deploy`, tạo schema thật, update LDP và query event log trên workspace: máy triển khai
+chưa có CLI/profile được chỉ định, ba task hạ tầng #21/#22/#23 còn mở. PR giữ draft; chưa đóng #44.
+Không deploy prod thủ công, không đánh dấu hoàn tất ETL từ update smoke.
+
+Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
+[event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
