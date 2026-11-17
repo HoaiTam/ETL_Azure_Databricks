@@ -3,6 +3,6 @@
   "parameters": {
     "table_name": "",
     "expected_rows": "0",
-    "mappings_json": "[]"
+    "translator_json": "{}"
   }
 }

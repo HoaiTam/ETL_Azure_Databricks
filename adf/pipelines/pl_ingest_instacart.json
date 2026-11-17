@@ -80,8 +80,8 @@
                       "value": "@string(json(pipeline().parameters.expected_rows)[item()])",
                       "type": "Expression"
                     },
-                    "mappings_json": {
-                      "value": "@string(json(pipeline().parameters.mappings_json)[item()])",
+                    "translator_json": {
+                      "value": "@string(json(pipeline().parameters.translators_json)[item()])",
                       "type": "Expression"
                     }
                   }

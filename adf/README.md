@@ -17,8 +17,11 @@ JSON được dựng theo API và đã kiểm model SDK; không publish trực t
 | `assets/_SUCCESS` | Template 0 byte | P1 đưa đúng file vào `landing/ops/_SUCCESS` trước lần chạy đầu |
 
 `azurerm_data_factory_pipeline.parameters` là `map(string)`. Vì vậy `tables_json`, `expected_rows`,
-`mappings_json` là **String chứa JSON**, đọc bằng `json()` trong ADF; không đổi thành object/array
-khi dùng provider này. Pipeline con nhận `table_name`, `expected_rows`, `mappings_json` cũng là String.
+`translators_json` là **String chứa JSON**, đọc bằng `json()` trong ADF; không đổi thành object/array
+khi dùng provider này. Pipeline con nhận `table_name`, `expected_rows`, `translator_json` cũng là String.
+Cha chọn object translator của từng bảng, gửi cả `type`, `mappings`, `typeConversion` sang con;
+Copy đặt Expression **trên toàn bộ `translator`**, theo mẫu parameterize mapping của Microsoft.
+Không đặt Expression riêng trong mảng `mappings`.
 
 Với từng pipeline, P1 đọc `pipeline_settings/<name>.json` và gán:
 
@@ -41,7 +44,8 @@ Hợp đồng linked service/dataset:
 | `ds_instacart_adls_csv` | DelimitedText ADLS; String params `file_system`, `folder_path`, `file_name` |
 | `ds_instacart_adls_binary` | Binary ADLS; cùng 3 params, dùng metadata/công bố/delete/marker |
 
-CSV dùng header, dấu phẩy, quote/escape `"`, UTF-8 không BOM. Mọi cột được mapping tường minh dạng String
+CSV dùng header, dấu phẩy, quote/escape `"`, UTF-8 không BOM. Dataset HTTP **không đặt rowDelimiter**
+để ADF tự nhận LF/CRLF; dataset ghi ADLS chuẩn hóa về LF. Mọi cột được mapping tường minh dạng String
 để giữ giá trị giờ có số 0 đầu và ô rỗng; kiểu nghiệp vụ được xử lý ở bronze/silver.
 
 ## Luồng chạy và retry
@@ -68,6 +72,7 @@ Hai If kiểm template/số dòng nằm ở cấp cao nhất của pipeline con;
 Pipeline cha dùng ForEach → If → Execute Pipeline để tuân giới hạn nesting của ADF.
 
 Copy/Metadata/Delete có retry 5 lần, nghỉ 60 giây, timeout activity 2 giờ (Zenodo có thể trả 503).
+Riêng `get_marker_template` đặt retry 0: thiếu template là lỗi cấu hình cần sửa, không đợi 5 phút rồi thất bại.
 Binary Copy dùng `PreserveHierarchy` + `validateDataConsistency: true`, không bỏ qua file lỗi.
 HTTP không hỗ trợ data consistency verification nên dùng mapping + đếm dòng, không bật flag đó trên HTTP.
 
@@ -121,6 +126,8 @@ Sửa catalog hoặc script dựng, chạy lại để đồng bộ JSON; không
 Workflow `adf-checks` chạy kiểm này và bộ test local; không dùng secret/OIDC/quyền cloud.
 Test local đọc **các JSON đã commit**, diễn giải tập biểu thức/hoạt động đang dùng, thay HTTP/ADLS bằng
 fixture/file local để kiểm lỗi giữa chừng, missing count, marker, CSV dấu phẩy/ngoặc kép và retry.
+Bộ mô phỏng đánh giá một tập biểu thức đang dùng; chỉ hỗ trợ dependency `Succeeded`, từ chối kiểu khác
+thay vì bỏ qua. Test có nguồn CRLF và kiểm contract translator/template.
 Đây là mô phỏng giới hạn, không xác nhận runtime ADF hay thông lượng file 578 MB.
 
 Để lấy resource JSON đầy đủ nhập vào trình soạn JSON khi debug (khác mảng activities cho Terraform):
@@ -138,6 +145,7 @@ chạy lần hai và xác nhận sáu lượt bỏ qua không Copy/Delete, stagi
 Theo dõi thời gian/throughput/retry của prior 578 MB. Chỉ sau đó đánh dấu nghiệm thu G1.
 
 Tham chiếu chính thức:
+[parameterize mapping](https://learn.microsoft.com/en-us/azure/data-factory/copy-activity-schema-and-type-mapping#parameterize-mapping),
 [nesting ADF](https://learn.microsoft.com/en-us/azure/data-factory/concepts-nested-activities),
 [DelimitedText](https://learn.microsoft.com/en-us/azure/data-factory/format-delimited-text),
 [consistency verification](https://learn.microsoft.com/en-us/azure/data-factory/copy-activity-data-consistency),

@@ -333,7 +333,7 @@ Bước 1 của luồng: 6 file Instacart vào landing/instacart/<bảng>/releas
   orders 3.421.083; prior 32.434.489; train 1.384.617; products 49.688; aisles 134; departments 21.
   Nguồn không nén, không dùng ZipDeflate; số đếm khớp data dictionary. Báo cáo ở
   `data/ad_de_06_verification.json`, dữ liệu thật/báo cáo local đã gitignore.
-- **13 test ADF local**, toàn bộ **110 test Python**, Ruff và SDK model round-trip
+- **16 test ADF local**, toàn bộ **113 test Python**, Ruff và SDK model round-trip
   (`azure-mgmt-datafactory==9.2.0`, 2 pipeline/3 dataset) đều đạt.
   Test đọc JSON thực, dùng fixture/file local kiểm lần hai chỉ đọc, lỗi copy/publish/delete/marker,
   thiếu/sai count, marker sai/thiếu và retry; đây không phải engine/debug ADF.
@@ -341,6 +341,10 @@ Bước 1 của luồng: 6 file Instacart vào landing/instacart/<bảng>/releas
 - **Chưa nghiệm thu Azure:** AD-OPS-25 (#27) còn mở, chưa export/debug Studio, publish hoặc chạy factory thật.
   P1 cần nạp dataset/linked service, settings String JSON + concurrency 1 và cả hai pipeline qua #27/#28;
   ba tiêu chí G1 trên giữ chưa tick. Không tạo/sửa tài nguyên Azure hay bật lịch trong phiên này.
+
+**Bổ sung sau review:** Expression đặt trên toàn bộ translator (`translator_json`), HTTP tự nhận LF/CRLF,
+kiểm template không retry; checklist stack 40 liệt kê rõ pipeline con, ba dataset, template và settings.
+Bộ mô phỏng local chỉ hỗ trợ dependency Succeeded và tập biểu thức đang dùng, không thay thế ADF thật.
 
 ### AD-DE-07
 

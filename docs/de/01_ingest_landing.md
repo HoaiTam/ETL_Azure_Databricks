@@ -58,17 +58,20 @@ Tham số `expected_rows` giữ các số đếm **không gồm header**:
 ```
 
 Provider Terraform nhận parameter map(string), nên giá trị trên được mã hóa thành String JSON;
-ADF đọc bằng `json()`. Cùng cách đó cho `tables_json` và `mappings_json`, settings nằm cạnh activities.
+ADF đọc bằng `json()`. Cùng cách đó cho `tables_json` và `translators_json`, settings nằm cạnh activities.
 
 - **Đã kiểm nguồn thật 2026-11-17:** MD5/header/số bản ghi CSV và `wc -l` trừ header của sáu file
   đều khớp catalog `adf/instacart_sources.json`; số đếm không cần đổi so với data dictionary.
 - **Theo spike #141:** Zenodo record 2654444 có CSV không nén, dùng đường dẫn
   `api/records/2654444/files/<file>.csv/content`, không đặt ZipDeflate cho nguồn này.
 - DelimitedText → DelimitedText không mapping có thể chép nguyên file và thiếu `rowsCopied`.
-  Vì vậy Copy dùng `TabularTranslator.mappings` đủ cột và `quoteAllText = true` như spike;
-  giữ các cột dạng String, quote/escape theo CSV chuẩn và UTF-8 không BOM.
+  Vì vậy Copy nhận toàn object translator qua `translator_json`, đặt Expression trên `translator`
+  (chứa `type`, `mappings` đủ cột và `typeConversion`) và dùng `quoteAllText = true` như spike;
+  giữ các cột dạng String, quote/escape theo CSV chuẩn và UTF-8 không BOM. Nguồn HTTP tự nhận LF/CRLF,
+  không ép rowDelimiter; output ADLS dùng LF.
 - Binary publish/marker bật consistency verification với PreserveHierarchy; không bật kiểm này cho HTTP
-  vì connector không hỗ trợ. Copy/Metadata/Delete retry 5 lần khi lỗi tạm thời, nghỉ 60 giây.
+  vì connector không hỗ trợ. Copy/Metadata/Delete retry 5 lần khi lỗi tạm thời, nghỉ 60 giây;
+  riêng kiểm template marker retry 0 vì thiếu template là lỗi cấu hình.
 - **Chưa nghiệm thu Azure:** AD-OPS-25 còn mở; JSON đã kiểm local/SDK, chưa export/debug từ Studio
   hay có sáu thư mục landing thật. Checklist chạy lần đầu/lần hai nằm ở `adf/README.md`.
 

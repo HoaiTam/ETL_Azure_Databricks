@@ -57,7 +57,9 @@ def test_source_catalog_mapping_and_copy_settings_match_data_contract():
     assert source["record"] == 2654444 and source["release"] == "2017"
     assert list(json.loads(params["expected_rows"]).values()) == [3421083, 32434489, 1384617, 49688, 134, 21]
     assert json.loads(params["tables_json"]) == list(source["tables"])
-    for table, mappings in json.loads(params["mappings_json"]).items():
+    for table, translator in json.loads(params["translators_json"]).items():
+        assert translator["type"] == "TabularTranslator" and translator["typeConversion"] is False
+        mappings = translator["mappings"]
         with (FIXTURE / f"{table}.csv").open() as stream:
             assert (
                 next(csv.reader(stream))
@@ -70,7 +72,10 @@ def test_source_catalog_mapping_and_copy_settings_match_data_contract():
     for a, _ in walk(artifacts["adf/pipelines/pl_ingest_instacart_table.json"]):
         if a["type"] == "Copy":
             if a["name"] == "copy_csv_to_staging":
-                assert a["typeProperties"]["translator"]["type"] == "TabularTranslator"
+                assert a["typeProperties"]["translator"] == {
+                    "value": "@json(pipeline().parameters.translator_json)",
+                    "type": "Expression",
+                }
                 assert a["typeProperties"]["sink"]["formatSettings"]["quoteAllText"] is True
                 assert a["typeProperties"]["enableSkipIncompatibleRow"] is False
                 assert "validateDataConsistency" not in a["typeProperties"]  # HTTP không hỗ trợ.
@@ -153,3 +158,36 @@ def test_lost_acknowledgment_after_marker_does_not_rewrite_published_table(runti
     runtime.run()
     assert sum(name == "copy_csv_to_staging" and table == "orders" for name, table in runtime.trace) == 1
     assert (published.read_bytes(), published.stat().st_mtime_ns) == before
+
+
+def test_http_line_endings_auto_detect_and_template_has_no_retry():
+    artifacts = render()
+    http = artifacts["adf/datasets/ds_instacart_http_csv.json"]["properties"]["typeProperties"]
+    assert "rowDelimiter" not in http
+    sink = artifacts["adf/datasets/ds_instacart_adls_csv.json"]["properties"]["typeProperties"]
+    assert sink["rowDelimiter"] == "\n"
+    template = artifacts["adf/pipelines/pl_ingest_instacart_table.json"][0]
+    assert template["name"] == "get_marker_template" and template["policy"]["retry"] == 0
+
+
+def test_crlf_sources_do_not_leave_carriage_return_in_last_column(runtime, tmp_path):
+    source = tmp_path / "crlf-source"
+    source.mkdir()
+    for file in FIXTURE.glob("*.csv"):
+        content = file.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        (source / file.name).write_bytes(content)
+    runtime.source = source
+    runtime.run()
+    for file in source.glob("*.csv"):
+        published = runtime.root / "landing/instacart" / file.stem / "release=2017" / file.name
+        with file.open(newline="") as raw, published.open(newline="") as landed:
+            rows = list(csv.reader(landed))
+            assert rows == list(csv.reader(raw))
+            assert all(not row[-1].endswith("\r") for row in rows)
+
+
+def test_local_simulator_refuses_unsupported_dependency_conditions(runtime):
+    activities = runtime.pipelines["pl_ingest_instacart"][0]["typeProperties"]["activities"]
+    activities[1]["dependsOn"][0]["dependencyConditions"] = ["Completed"]
+    with pytest.raises(ValueError, match="dependencyConditions"):
+        runtime.run()

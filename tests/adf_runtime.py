@@ -87,6 +87,9 @@ class LocalADF:
     def execute(self, activities, context):
         pending, completed = list(activities), set()
         while pending:
+            # Bộ mô phỏng chỉ hỗ trợ dependency Succeeded; từ chối kiểu khác thay vì bỏ qua.
+            if any(d["dependencyConditions"] != ["Succeeded"] for a in pending for d in a.get("dependsOn", [])):
+                raise ValueError("Chưa mô phỏng dependencyConditions ngoài Succeeded")
             available = [a for a in pending if all(d["activity"] in completed for d in a.get("dependsOn", []))]
             if not available:
                 raise ValueError("Chu trình hoặc dependency sai scope")
@@ -121,7 +124,8 @@ class LocalADF:
                         sink_format = sink_definition["typeProperties"]
                         with src.open(newline="") as stream:
                             rows = list(csv.DictReader(stream, quotechar=source_format["quoteChar"]))
-                        mappings = self.value(props["translator"]["mappings"], context)
+                        translator = self.value(props["translator"], context)
+                        mappings = translator["mappings"]
                         with dst.open("w", newline="") as stream:
                             writer = csv.writer(stream, quotechar=sink_format["quoteChar"], quoting=csv.QUOTE_ALL)
                             writer.writerow([m["sink"]["name"] for m in mappings])

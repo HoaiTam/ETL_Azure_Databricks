@@ -18,7 +18,7 @@ def ref(name, parameters):
     return {"referenceName": name, "type": "DatasetReference", "parameters": parameters}
 
 
-def activity(name, kind, properties, *, after=None, description=None, **extra):
+def activity(name, kind, properties, *, after=None, description=None, retry=5, **extra):
     result = {
         "name": name,
         "type": kind,
@@ -29,7 +29,7 @@ def activity(name, kind, properties, *, after=None, description=None, **extra):
     if kind in ("Copy", "Delete", "GetMetadata"):
         result["policy"] = {
             "timeout": "0.02:00:00",
-            "retry": 5,
+            "retry": retry,
             "retryIntervalInSeconds": 60,
             "secureOutput": False,
             "secureInput": False,
@@ -70,6 +70,10 @@ def render(root=ROOT):
         ]
         for table, info in tables.items()
     }
+    translators = {
+        table: {"type": "TabularTranslator", "mappings": columns, "typeConversion": False}
+        for table, columns in mappings.items()
+    }
     # Provider azurerm dùng map(string) cho pipeline.parameters, nên JSON đi qua String + json().
     settings = {
         "pl_ingest_instacart": {
@@ -77,12 +81,12 @@ def render(root=ROOT):
             "parameters": {
                 "tables_json": json.dumps(list(tables)),
                 "expected_rows": json.dumps({table: info["rows"] for table, info in tables.items()}),
-                "mappings_json": json.dumps(mappings, separators=(",", ":")),
+                "translators_json": json.dumps(translators, separators=(",", ":")),
             },
         },
         "pl_ingest_instacart_table": {
             "concurrency": 1,
-            "parameters": {"table_name": "", "expected_rows": "0", "mappings_json": "[]"},
+            "parameters": {"table_name": "", "expected_rows": "0", "translator_json": "{}"},
         },
     }
 
@@ -128,8 +132,8 @@ def render(root=ROOT):
                                             "expected_rows": expr(
                                                 "@string(json(pipeline().parameters.expected_rows)[item()])"
                                             ),
-                                            "mappings_json": expr(
-                                                "@string(json(pipeline().parameters.mappings_json)[item()])"
+                                            "translator_json": expr(
+                                                "@string(json(pipeline().parameters.translators_json)[item()])"
                                             ),
                                         },
                                     },
@@ -159,6 +163,7 @@ def render(root=ROOT):
                 "fieldList": ["size"],
                 "storeSettings": {"type": "AzureBlobFSReadSettings", "recursive": False},
             },
+            retry=0,
         ),
         activity(
             "if_empty_template",
@@ -197,11 +202,7 @@ def render(root=ROOT):
                     "storeSettings": {"type": "AzureBlobFSWriteSettings"},
                     "formatSettings": {"type": "DelimitedTextWriteSettings", "quoteAllText": True},
                 },
-                "translator": {
-                    "type": "TabularTranslator",
-                    "mappings": expr("@json(pipeline().parameters.mappings_json)"),
-                    "typeConversion": False,
-                },
+                "translator": expr("@json(pipeline().parameters.translator_json)"),
                 "enableStaging": False,
                 "enableSkipIncompatibleRow": False,
             },
@@ -317,7 +318,12 @@ def render(root=ROOT):
                     for key in (["file_name"] if http else ["file_system", "folder_path", "file_name"])
                 },
                 "type": kind,
-                "typeProperties": {"location": location} | (csv_settings if kind == "DelimitedText" else {}),
+                "typeProperties": {"location": location}
+                | (
+                    {key: value for key, value in csv_settings.items() if not (http and key == "rowDelimiter")}
+                    if kind == "DelimitedText"
+                    else {}
+                ),
                 "schema": [],
             },
         }
