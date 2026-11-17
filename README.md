@@ -50,8 +50,8 @@ Nguồn dữ liệu → Trích xuất → Làm sạch & biến đổi → Lưu t
 | `docs/` | Kiến trúc, data dictionary, kế hoạch DevOps, DE, DS | [tổng quan dự án](docs/00_tong_quan_du_an.md) · [devops](docs/devops/00_tong_quan.md) · [de](docs/de/00_tong_quan_de.md) · [ds](docs/ds/00_tong_quan_ds.md) · [phân việc](docs/tasks/README.md) |
 | `infra/` | Terraform: `bootstrap/`, `modules/`, `stacks/` (10-core, 20-stream, 30-databricks, 40-orchestration, 90-sandbox), `envs/` | [infra/README.md](infra/README.md) |
 | `.github/` | Workflow CI/CD, CODEOWNERS, PR template | docs/devops/04 |
-| `bundles/` | Databricks Asset Bundles (job, task) | docs/devops/05, mục 4 |
-| `src/` | Code PySpark: `common/`, `batch/`, `streaming/`, `ml/` (DApriori, DATID, FP-Growth, thực nghiệm); `mapreduce/` (Java) | docs/de/00 §6, docs/ds/00 §8 |
+| `bundles/` | Databricks Asset Bundles; job batch thật sẽ được bổ sung ở AD-DE-18 | docs/devops/05, mục 4 |
+| `src/` | Khung `ingest/`, `pipelines/{batch,stream}/`, `tasks/ds_prepare/`, `common/`, `streaming/simulator/`; phần DS sẽ bổ sung theo task | docs/de/00 §6, docs/ds/00 §8 |
 | `local/hadoop/` | Cụm Hadoop HDFS + YARN + Spark bằng Docker, so sánh MapReduce và Spark | docs/ds/03 |
 | `tests/` | pytest với PySpark local | — |
 | `adf/` | JSON pipeline ADF, được stack 40-orchestration publish | docs/devops/06, mục 1 |

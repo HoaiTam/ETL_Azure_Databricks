@@ -90,8 +90,8 @@ Quyền duyệt PR theo `.github/CODEOWNERS`.
 
 **Trạng thái hiện tại: repo mới có khung**
 - Các `main.tf` trong `infra/stacks/*` có checklist `[x]/[ ]` theo từng bước của tài liệu.
-- `src/` đang theo cấu trúc tạm.
-- Cấu trúc đích nằm ở `docs/de/00_tong_quan_de.md` §6: `src/ingest/`, `src/pipelines/{batch,stream}/`, `src/tasks/`, `src/common/`.
+- `src/` đã có khung theo cấu trúc đích của AD-DE-01; logic các tầng chưa triển khai.
+- Cấu trúc ở `docs/de/00_tong_quan_de.md` §6: `src/ingest/`, `src/pipelines/{batch,stream}/`, `src/tasks/`, `src/common/`.
 
 ## Lệnh
 

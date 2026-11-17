@@ -29,7 +29,7 @@
   pull_request_template.md
 infra/        # tài liệu 02, 03, 05
 bundles/      # databricks.yml + resources/*.yml (Databricks Asset Bundles)
-src/          # code PySpark: common/, batch/, streaming/, ml/
+src/          # common/, ingest/, pipelines/{batch,stream}/, tasks/, streaming/, ml/
 adf/          # JSON pipeline/dataset (tài liệu 06)
 powerbi/      # dự án Power BI dạng PBIP (lưu văn bản, diff được)
 tests/        # pytest: unit test hàm transform với pyspark local
@@ -43,7 +43,11 @@ tests/        # pytest: unit test hàm transform với pyspark local
 /infra/                       @<P1>
 /.github/                     @<P1>
 /infra/stacks/20-stream/      @<P3> @<P1>
-/adf/  /src/batch/            @<P2>
+/adf/                        @<P2>
+/src/ingest/                 @<P2>
+/src/pipelines/batch/        @<P2>
+/src/tasks/                  @<P2>
+/src/pipelines/stream/       @<P3>
 /src/streaming/               @<P3>
 /powerbi/  /src/ml/           @<P4>
 ```

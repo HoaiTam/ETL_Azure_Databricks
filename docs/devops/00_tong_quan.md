@@ -77,7 +77,7 @@ Nhóm tập trung vào **mục 4 (phân tích dữ liệu + trực quan dữ li�
 | Vai | Giữ subscription | Phụ trách chính | Code owner |
 |---|---|---|---|
 | **P1 · Platform / DevOps** | Sub A (core) | Tài liệu 01–05, stack `bootstrap`, `10-core`, `30-databricks`, workflow CI/CD, chi phí | `infra/**`, `.github/**` |
-| **P2 · DE batch** | — (dùng Sub A) | ADF pipeline, Auto Loader, bronze → silver → gold batch, DQ | `adf/**`, `src/batch/**` |
+| **P2 · DE batch** | — (dùng Sub A) | ADF pipeline, Auto Loader, bronze → silver → gold batch, DQ | `adf/**`, `src/ingest/**`, `src/pipelines/batch/**`, `src/tasks/**` |
 | **P3 · DE streaming** | Sub B (stream) | Stack `20-stream`, simulator, streaming jobs, đo độ trễ khác region | `src/streaming/**`, `infra/stacks/20-stream/**` |
 | **P4 · BI / DS** | Sub C (sandbox), Sub D dự phòng | Power BI (4 report, RLS, mobile), lớp serving; sau G3 làm DApriori / DATID / FP-Growth, thực nghiệm, MapReduce (cùng P3) | `powerbi/**`, `src/ml/**`, `src/mapreduce/**`, `local/hadoop/**` |
 
