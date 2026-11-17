@@ -123,8 +123,31 @@ order_ts_sim phải ra cùng giá trị ở silver (SQL) và simulator (Python).
 
 **Xong khi**
 
-- [ ] uv run pytest tests/test_sim_time.py tests/test_norm.py xanh
-- [ ] Bản SQL và Python cho cùng order_ts_sim trên toàn bộ fixture
+- [x] uv run pytest tests/test_sim_time.py tests/test_norm.py xanh
+- [x] Bản SQL và Python cho cùng order_ts_sim trên toàn bộ fixture
+
+**Kết quả local AD-DE-02 (2026-11-17)**
+
+- Đã có `src/common/sim_time.py`: mốc `SIM_END_ANCHOR`, hàm UTC thuần
+  `order_ts_sim(user_id, hour, days_back=0)` và `order_time_sim_sql(orders_table)`.
+- SQL loại trùng trước khi cộng ngày, sắp `order_number` theo số, chạy trên Spark 3.5 local;
+  cast dữ liệu CSV để nhận được chuỗi số thập phân ở ANSI mode. Timestamp trả UTC bằng
+  `make_timestamp_ltz`, không phụ thuộc timezone hay default timestampType của session.
+- Đã có `src/common/text.py`: `norm` theo bộ từ nhiễu trong DE/03; xử lý thêm đúng số đo
+  thập phân và đơn vị ghép `fl oz`. Ví dụ batch/simulator trong tài liệu import lại các hàm này.
+- 47 ca kiểm thử mới: bốn cặp tên ở data dictionary, từ nhiễu/đơn vị, đầu vào rỗng,
+  mốc thời gian, NULL ở đơn đầu, đơn cuối train/test, lịch sử đảo thứ tự, đơn thứ 10 trở lên,
+  bản ghi cũ lặp lại và phép nhân vượt INT32. SQL/Python khớp trên toàn bộ fixture ở
+  UTC, Asia/Ho_Chi_Minh, America/New_York, với ANSI bật/tắt và default TIMESTAMP_NTZ.
+- Toàn bộ pytest **82 test đạt**, Ruff check/format và `git diff --check` sạch
+  trên Python 3.11.9, Java 17, Spark 3.5 local[1].
+- Đối soát độc lập SQL/Python trên mẫu thật của AD-DE-01: **34.538 đơn / 2.063 khách,
+  0 sai lệch** ở session Asia/Ho_Chi_Minh và ANSI bật. `norm` chạy trên toàn bộ
+  **49.688 tên sản phẩm**, kết quả không đổi khi chuẩn hóa lần hai.
+  Bằng chứng local: `data/ad_de_02_verification.json` (đã gitignore).
+- **Chưa kiểm trên Databricks workspace**; tích hợp pipeline/simulator thuộc AD-DE-12,
+  AD-DE-13 và AD-ST-01. **Nghiệm thu cuối còn chờ AD-DE-01 (#37) Done**;
+  nhánh AD-DE-02 đang dựa trên phần AD-DE-01 chờ merge ở PR #135.
 
 ### AD-DE-03
 

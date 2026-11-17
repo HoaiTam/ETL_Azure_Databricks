@@ -178,43 +178,34 @@ Instacart không có ngày tháng ([data_dictionary §4](../data/data_dictionary
 - Các đơn trước được tính lùi bằng tổng `days_since_prior_order` của các đơn sau nó.
 
 Công thức chỉ dùng phép số nguyên. Simulator Python tính lại **ra đúng cùng giá trị** ([04 §2](04_streaming.md)); test `tests/test_sim_time.py` so khớp hai bản.
+AD-DE-02 đặt mốc `SIM_END_ANCHOR`, hàm `order_ts_sim` và truy vấn SQL ở
+`src/common/sim_time.py`. Hàm Python trả `datetime` có múi giờ UTC; SQL dùng
+`make_timestamp_ltz(..., 'UTC')` để cùng một thời điểm dù session đổi múi giờ hoặc kiểu timestamp mặc định.
 
 ```python
 # src/pipelines/batch/silver_instacart.py  (đoạn đầu)
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
+from common.sim_time import order_time_sim_sql
+
 CAT    = spark.conf.get("catalog")
 BRONZE = f"{CAT}.{spark.conf.get('bronze')}"
 SILVER = f"{CAT}.{spark.conf.get('silver')}"
-SIM_END_ANCHOR = "2026-03-01"          # đơn cuối rơi vào 01/03 + (0..29) ngày
 
 
 @dp.materialized_view(name=f"{SILVER}.order_time_sim",
                       comment="order_ts_sim tất định cho mọi đơn (prior/train/test)")
 @dp.expect_or_fail("has_ts", "order_ts_sim IS NOT NULL")
 def order_time_sim():
-    return spark.sql(f"""
-      WITH o AS (
-        SELECT order_id, user_id, eval_set, order_number, order_hour_of_day,
-               CAST(coalesce(days_since_prior_order, 0) AS INT) AS dsp
-        FROM {BRONZE}.orders
-        QUALIFY row_number() OVER (PARTITION BY order_id ORDER BY _ingest_ts DESC) = 1
-      ),
-      back AS (
-        SELECT *,
-               coalesce(sum(dsp) OVER (PARTITION BY user_id ORDER BY order_number
-                                       ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING), 0) AS days_back
-        FROM o
-      )
-      SELECT order_id, user_id, eval_set,
-             to_timestamp(date_sub(date_add(DATE'{SIM_END_ANCHOR}', CAST(pmod(user_id * 7919, 30) AS INT)),
-                                   days_back))
-               + make_interval(0, 0, 0, 0, order_hour_of_day, 0, 0) AS order_ts_sim
-      FROM back""")
+    return spark.sql(order_time_sim_sql(f"{BRONZE}.orders"))
 ```
 
-`QUALIFY row_number() … = 1` chống trùng khi một file orders bị nạp hai lần.
+Truy vấn dùng `row_number()` trong CTE rồi lọc `rn = 1`, chống trùng theo `order_id`
+trước khi tính tổng ngày. Cách này chạy được trên Spark 3.5 local (không dùng `QUALIFY`).
+Cast `order_number` sang INT để đơn 10 không đứng trước đơn 2 khi bronze chứa STRING;
+cast `user_id` sang BIGINT trước phép nhân và `days_back` sang INT cho `date_sub`.
+`days_since_prior_order` đi qua DOUBLE để nhận được cả chuỗi `"14.0"` ở ANSI mode.
 
 Pipeline batch viết toàn bộ bằng Python. Chỗ nào SQL dễ đọc hơn thì dùng `spark.sql(f"""…""")` bên trong hàm, tên catalog/schema lấy từ `spark.conf`. Như vậy không phải lo cú pháp thay biến `${…}` của file SQL trong LDP.
 
@@ -324,11 +315,12 @@ File này là **notebook** (định dạng `.py` có header `# Databricks notebo
 
 # COMMAND ----------
 # src/pipelines/batch/silver_off.py
-import re
 import pandas as pd
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F, types as T
 from pyspark.sql.window import Window
+
+from common.text import norm
 
 CAT    = spark.conf.get("catalog")
 BRONZE = f"{CAT}.{spark.conf.get('bronze')}"
@@ -353,15 +345,6 @@ def off_products_clean():
             .withColumn("rn", F.row_number().over(
                 Window.partitionBy("product_id", "off_code").orderBy(F.col("_ingest_ts").desc())))
             .where("rn = 1").drop("rn"))
-
-
-NOISE = re.compile(r"\b(organic|bag of|pack|\d+(\.\d+)?\s?(oz|lb|ct|fl|ml|g|kg))\b")
-
-
-def norm(s: str) -> str:
-    s = (s or "").lower()
-    s = re.sub(r"[^a-z0-9 ]", " ", s)
-    return re.sub(r"\s+", " ", NOISE.sub(" ", s)).strip()
 
 
 @F.pandas_udf(T.DoubleType())
@@ -394,7 +377,11 @@ def product_off_match():
             .select("product_id", "off_code", "off_match_score", "off_match_status"))
 ```
 
-Hàm `norm` được tách ra `src/common/text.py` để viết test (`tests/test_norm.py`) với 4 ví dụ ở [data_dictionary §5.6](../data/data_dictionary.md). Notebook chỉ import lại hàm đó.
+Hàm `norm` ở `src/common/text.py` có test (`tests/test_norm.py`) với 4 cặp tên ở
+[data_dictionary §5.6](../data/data_dictionary.md). Notebook chỉ import lại hàm đó.
+Hàm bỏ từ nhiễu/số đo trước khi bỏ dấu câu để `12.5 oz` không để lại `12`,
+nhận đơn vị ghép `fl oz`, rồi chuẩn hóa khoảng trắng và cụm `bag-of`.
+Đây là chuẩn hóa tên, chưa quyết định hai sản phẩm có khớp nhau; ngưỡng fuzzy vẫn áp dụng ở bước sau.
 
 ## 6. `dim_product`: join nhiều nguồn mà không nhân dòng
 

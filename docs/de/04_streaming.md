@@ -43,7 +43,7 @@ Theo [data_dictionary §4](../data/data_dictionary.md), bổ sung thêm 2 trư�
 {"event_id": "order-1187899", "event_type": "order_placed", "schema_version": 1,
  "order_id": 1187899, "user_id": 1, "order_number": 11, "order_dow": 4,
  "order_hour_of_day": 8, "days_since_prior_order": 14,
- "event_time": "2026-03-14T08:00:00Z", "replay_run_id": "run-03",
+ "event_time": "2026-03-30T08:00:00Z", "replay_run_id": "run-03",
  "produced_at": "2026-11-20T09:15:02.123Z", "producer_location": "laptop-hcm",
  "items": [{"product_id": 196, "add_to_cart_order": 1, "reordered": 1}]}
 ```
@@ -60,13 +60,7 @@ import argparse, datetime as dt, json, math, os, time
 import pandas as pd
 from confluent_kafka import Producer          # pip install confluent-kafka pandas
 
-ANCHOR = dt.date(2026, 3, 1)
-
-
-def order_ts_sim(user_id: int, hour: int) -> dt.datetime:
-    """Phải khớp silver.order_time_sim (đơn cuối: days_back = 0)."""
-    day = ANCHOR + dt.timedelta(days=(user_id * 7919) % 30)
-    return dt.datetime(day.year, day.month, day.day, hour, tzinfo=dt.timezone.utc)
+from common.sim_time import order_ts_sim
 
 
 def clean(v):
@@ -127,6 +121,9 @@ python src/streaming/simulator/simulate.py --data-dir ./data --run-id run-01 --t
 ```
 
 - `key = order_id`, nên mọi sự kiện của một đơn vào cùng partition và giữ thứ tự trong partition.
+- `order_ts_sim` import từ `src/common/sim_time.py`; đơn train là đơn cuối nên dùng
+  `days_back = 0` mặc định. Đặt `PYTHONPATH=src` khi chạy script trực tiếp từ gốc repo.
+  Không viết lại công thức trong simulator; test local đã so khớp với SQL ở silver.
 - `days_since_prior_order` không bao giờ rỗng ở đơn train (đơn train luôn có đơn trước), nhưng hàm `clean` vẫn đổi NaN thành `null` để JSON hợp lệ.
 
 ## 3. Pipeline `instacart_stream`
