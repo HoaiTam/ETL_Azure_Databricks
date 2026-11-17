@@ -1,6 +1,6 @@
 # Đồng bộ `Input status` và `Còn chờ` trên GitHub Project #8 theo Status và phụ thuộc (docs/tasks/README.md).
 # Token mặc định của Actions không ghi được vào Project của tài khoản cá nhân, nên dùng secret `PROJECT_TOKEN`:
-# PAT classic có scope `project` (và `repo` để đọc issue).
+# PAT classic chỉ cần scope `project`; repo public nên đọc issue không cần scope `repo`.
 # Kéo thẻ giữa các cột trên Project không phát sự kiện cho repo, nên có thêm lịch chạy định kỳ.
 name: sync-task-board
 

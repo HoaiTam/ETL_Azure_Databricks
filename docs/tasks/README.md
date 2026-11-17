@@ -39,7 +39,7 @@ Mỗi task là một issue trên GitHub và một thẻ trên GitHub Project [ET
 | Cần cập nhật | Needs Update | Phải sửa theo kết quả kiểm tra |
 | Đã hoàn thành | Done | Đã nghiệm thu, đầu ra dùng được cho task sau |
 
-Field `Còn chờ` ghi các task liên quan chưa Done (`Bắt đầu:` đang chặn, `Nên nhận:` cần cho gate hoàn tất). Workflow `sync-task-board` tự chạy `scripts/sync_task_board.py --apply` khi đóng hoặc mở lại issue và cứ 30 phút một lần, để cập nhật `Input status` và `Còn chờ` cho cả board. Issue đã đóng (completed) được tính là Done. Workflow cần secret `PROJECT_TOKEN` (PAT classic có scope `project` và `repo`). Muốn thấy ngay thì chạy tay `python3 scripts/sync_task_board.py --apply` hoặc bấm *Run workflow*.
+Field `Còn chờ` ghi các task liên quan chưa Done (`Bắt đầu:` đang chặn, `Nên nhận:` cần cho gate hoàn tất). Workflow `sync-task-board` tự chạy `scripts/sync_task_board.py --apply` khi đóng hoặc mở lại issue và cứ 30 phút một lần, để cập nhật `Input status` và `Còn chờ` cho cả board. Issue đã đóng (completed) được tính là Done. Workflow cần secret `PROJECT_TOKEN` (PAT classic chỉ cần scope `project`, vì repo public; chuyển repo sang private thì thêm `repo`). Muốn thấy ngay thì chạy tay `python3 scripts/sync_task_board.py --apply` hoặc bấm *Run workflow*.
 
 ## Bảng tổng
 
