@@ -92,6 +92,12 @@ Quyền đọc event log cho vai khác vẫn theo AD-OPS-20; không tự mở r�
 Xem kết quả validate, deploy, smoke update và đọc event log trên [issue AD-DE-08](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/44).
 Smoke update kiểm đường chạy của pipeline và event log. Đối soát dữ liệu ETL thực hiện ở các task bronze, silver và gold.
 
+AD-DE-17 có init_reconciliation/reconcile/reconcile_g3/reconcile_g4 trong `src/tasks/`,
+chạy SQL warehouse theo profile kỳ vọng nguồn và run_id/check_date chung. Các stage đọc nguồn
+batch/G3/G4 tách riêng để không resolve bảng chưa có; AD-DE-18 sẽ tích hợp điều phối, chưa tạo job mới.
+Cách lấy kỳ vọng từ manifest và kiểm đủ inventory trước refresh_bi/ds-prepare:
+[06c_nghiem_thu_reconciliation.md](../docs/de/06c_nghiem_thu_reconciliation.md). Chưa nghiệm thu cloud.
+
 AD-DE-16 có `src/tasks/collect_dq.sql`, nhận catalog/ops_schema/event_log_table/update_id,
 thu batch hoặc stream vào cùng bảng Delta `ops.dq_results`. Task chạy trên warehouse serverless,
 do AD-DE-18 tích hợp điều phối sau; không tạo job/cluster trong thay đổi này.
