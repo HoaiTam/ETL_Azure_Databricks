@@ -23,6 +23,19 @@
   - Mỗi hàm thuần trong `common/` có test trong `tests/`, dữ liệu nhỏ trong `tests/fixtures/`.
   - Logic có hai bản (SQL và Python) phải có test so khớp.
 
+## Hàm dùng chung đã có (AD-DE-02)
+
+- `common.sim_time.order_ts_sim(user_id, hour, days_back=0)` trả `datetime` UTC.
+  Simulator dùng mặc định `days_back=0` cho đơn cuối train/test. Với đơn prior,
+  `days_back` là tổng `days_since_prior_order` của các đơn sau nó trong cùng lịch sử khách hàng.
+- `common.sim_time.order_time_sim_sql(orders_table)` dựng truy vấn SELECT cho silver từ bronze:
+  có đủ header prior/train/test và `_ingest_ts`. Dùng nguyên câu SQL đã kiểm thử trên local;
+  không sao chép công thức vào pipeline. Ví dụ: `spark.sql(order_time_sim_sql("instacart.p2_bronze.orders"))`.
+- `common.text.norm(name)` chuẩn hóa tên tiếng Anh để fuzzy match OFF, nhận `None` thành chuỗi rỗng.
+  Bỏ từ nhiễu, số đo trước dấu câu để không để lại phần nguyên của số đo thập phân.
+- Chạy từ gốc repo: `uv run pytest tests/test_sim_time.py tests/test_norm.py -q`.
+  Script Python chạy trực tiếp cần `PYTHONPATH=src` để import `common`.
+
 ## Dữ liệu mẫu cho phát triển local
 
 - Fixture nhỏ tự dựng ở `tests/fixtures/instacart/`, gồm đủ sáu CSV; không phải dữ liệu thật.

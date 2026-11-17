@@ -239,7 +239,7 @@ Mỗi đơn là một sự kiện, gồm header từ `orders` và mảng `items`
 {"event_id": "order-1187899", "event_type": "order_placed", "schema_version": 1,
  "order_id": 1187899, "user_id": 1, "order_number": 11, "order_dow": 4,
  "order_hour_of_day": 8, "days_since_prior_order": 14,
- "event_time": "2026-03-14T08:00:00Z", "replay_run_id": "run-03",
+ "event_time": "2026-03-30T08:00:00Z", "replay_run_id": "run-03",
  "items": [{"product_id": 196, "add_to_cart_order": 1, "reordered": 1}]}
 ```
 
@@ -247,8 +247,12 @@ Mỗi đơn là một sự kiện, gồm header từ `orders` và mảng `items`
 
 Dữ liệu gốc không có ngày tháng, nên thời gian được dựng như sau:
 
-1. Đặt đơn `train` (đơn cuối) của mỗi khách vào một ngày ngẫu nhiên trong cửa sổ replay, ví dụ 30 ngày.
+1. Đặt đơn cuối (`train` hoặc `test`) của mỗi khách vào ngày tất định
+   `2026-03-01 + (user_id × 7919 mod 30)`, tại giờ `order_hour_of_day`, theo UTC.
 2. Tính lùi các đơn `prior` bằng cách trừ dần `days_since_prior_order`. Giờ trong ngày lấy theo `order_hour_of_day`.
+
+Hàm Python và SQL dùng chung ở `src/common/sim_time.py`; `days_back` chỉ cộng khoảng cách
+của các đơn **sau** đơn đang xét, không cộng khoảng cách của chính nó.
 
 Hệ quả cho BI:
 
