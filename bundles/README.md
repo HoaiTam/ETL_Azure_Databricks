@@ -98,5 +98,10 @@ Notebook cài RapidFuzz ở ô đầu; không thêm cluster/job. Cách lấy s�
 [03d_nghiem_thu_off.md](../docs/de/03d_nghiem_thu_off.md). Số đo theo nhóm nằm ở
 [data dictionary §5.6](../docs/data/data_dictionary.md#56-cách-join-ghép-theo-tên-qua-bảng-cầu-nối).
 
+AD-DE-14 bổ sung MV `dim_product` trong cùng notebook, đọc tám bảng nguồn bằng batch và dùng
+`as_of_date` để chọn khuyến mãi. Giá hiện hành lấy từ SCD2, OFF/ảnh chỉ dùng matched, có fail guard
+cho fanout và xung đột nguồn. Không thêm cluster/job. Cách đối soát 49.688 khóa và coverage giá thật:
+[03e_nghiem_thu_dim_product.md](../docs/de/03e_nghiem_thu_dim_product.md); chưa kiểm workspace.
+
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).

@@ -412,38 +412,68 @@ Kết quả đo AD-DE-13 ở [data dictionary §5.6](../data/data_dictionary.md#
 
 ## 6. `dim_product`: join nhiều nguồn mà không nhân dòng
 
-```python
-@dp.materialized_view(name=f"{SILVER}.dim_product", cluster_by=["product_id"],
-                      comment="products + aisle + department + giá hiện hành + KM đang chạy + OFF")
-@dp.expect_or_fail("no_fanout", "dup_cnt = 1")          # LEFT JOIN không được nhân dòng
-@dp.expect("has_price", "current_price IS NOT NULL")
-def dim_product():
-    as_of = F.to_date(F.lit(spark.conf.get("as_of_date", "2026-03-30")))
-    p  = spark.read.table(f"{BRONZE}.products").dropDuplicates(["product_id"])
-    a  = spark.read.table(f"{BRONZE}.aisles").dropDuplicates(["aisle_id"])
-    d  = spark.read.table(f"{BRONZE}.departments").dropDuplicates(["department_id"])
-    pr = (spark.read.table(f"{SILVER}.product_prices_history").where("__END_AT IS NULL")
-          .select("product_id", F.col("unit_price").alias("current_price")))
-    km = (spark.read.table(f"{SILVER}.promotions")
-          .where((F.col("start_date") <= as_of) & (F.col("end_date") >= as_of))
-          .groupBy("product_id").agg(F.max("discount_pct").alias("discount_pct")))   # gộp trước khi join
-    m  = spark.read.table(f"{SILVER}.product_off_match").where("off_match_status = 'matched'")
-    off = spark.read.table(f"{SILVER}.off_products_clean").drop("product_id", "_ingest_ts")
-    img = spark.read.table(f"{BRONZE}.product_images").select("off_code", F.col("path").alias("image_path"))
+MV khai báo trong [`silver_off.py`](../../src/pipelines/batch/silver_off.py), truy vấn batch nằm ở
+[`common/product.py`](../../src/common/product.py). Tám nguồn: products, aisles, departments,
+product_prices_history, promotions, product_off_match, off_products_clean và product_images.
+Bảng không tự ghi dữ liệu, không gọi action, không cần job/cluster riêng.
 
-    df = (p.join(a, "aisle_id", "left").join(d, "department_id", "left")
-           .join(pr, "product_id", "left").join(km, "product_id", "left")
-           .join(m.select("product_id", "off_code", "off_match_score", "off_match_status"), "product_id", "left")
-           .join(off.dropDuplicates(["off_code"]), "off_code", "left")
-           .join(img.dropDuplicates(["off_code"]), "off_code", "left")
-           .withColumn("on_promotion", F.col("discount_pct").isNotNull()))
-    # dup_cnt ở lại trong bảng để expectation kiểm được; Power BI không dùng cột này
-    return df.withColumn("dup_cnt", F.count("*").over(Window.partitionBy("product_id")))
-```
+### 6.1 Grain và giá/khuyến mãi
 
-**Quy tắc chống nhân dòng:** mọi bảng bên phải của LEFT JOIN phải **duy nhất theo khóa join** trước khi join (`dropDuplicates`, `groupBy`, hoặc lọc `__END_AT IS NULL`). `expect_or_fail("no_fanout")` dừng pipeline nếu ai đó vô tình phá quy tắc này. Như vậy `dim_product` luôn đúng **49.688** dòng.
+- Danh mục gốc là mọi `product_id` hợp lệ từ `bronze.products`, **LEFT JOIN** các nguồn làm giàu.
+  Thiếu giá, danh mục con hoặc OFF không làm mất sản phẩm.
+- Products/aisles/departments là release bất biến. Với mỗi khóa, ưu tiên bản không có
+  `_rescued_data`, rồi chọn bản mới nhất theo `_ingest_ts`. Nếu mọi bản đều có rescue, vẫn giữ
+  bản mới nhất và ghi cảnh báo. Nhiều payload khác nhau trong nhóm được ưu tiên cũng ghi cảnh báo.
+- Khóa sản phẩm NULL, không ép được sang INT hoặc không dương được đếm ở view
+  `catalog_products_assessed` trước khi loại khỏi bridge và dimension.
+- Bật `enable_off=true` khi đường dẫn OFF đã có dữ liệu. Cờ này điều khiển cả bridge và `dim_product`.
+- Giá lấy **chỉ** hàng `__END_AT IS NULL`, giữ `unit_price` thành `current_price` DECIMAL và `currency`.
+  Không lấy MAX giá, không dùng giá đã hết hiệu lực để bù thiếu. Nhiều hàng đang mở cho cùng sản phẩm
+  là lỗi hợp đồng SCD2 và làm flow fail, kể cả hai hàng giống nhau.
+- `as_of_date` từ configuration, mặc định `2026-03-30`, phải là ngày ISO `YYYY-MM-DD` hợp lệ.
+  Chỉ ngày cấu hình này dùng để lọc khuyến mãi `start_date <= as_of_date <= end_date`, rồi
+  `GROUP BY product_id / MAX(discount_pct)` **trước** join. Không cộng chồng mức giảm.
+  `on_promotion = discount_pct IS NOT NULL`, nên khuyến mãi 0% vẫn là đang chạy.
+- Giá hiện hành không phải giá tại `as_of_date` hay tại lúc đặt hàng. Doanh thu lịch sử ở
+  AD-DE-22 phải join `product_prices_history` theo khoảng hiệu lực `[__START_AT, __END_AT)`.
 
-Đoạn này nằm trong `silver_off.py`, dùng chung import (`Window`, `F`) ở đầu notebook. `as_of_date` lấy từ `configuration` của pipeline, mặc định là ngày cuối cửa sổ replay.
+### 6.2 OFF và ảnh
+
+- Giữ `off_match_score`/`off_match_status` của **mọi** sản phẩm để BI đo chất lượng phủ.
+  Thiếu dòng bridge nhận `no_match`/0. Chỉ khi `matched` mới giữ `off_code` để làm giàu.
+- Join OFF bằng **cặp `(product_id, off_code)`**, không bỏ `product_id` rồi khử trùng toàn cục theo barcode.
+  Hai sản phẩm dùng cùng barcode có thể mang payload OFF khác nhau từ hai lần tra; phải giữ đúng bản của từng sản phẩm.
+- `low_confidence` và `no_match` giữ điểm/nhãn nhưng các trường OFF/ảnh là NULL.
+  Điều này chặn cả ảnh trong cache và thông tin dinh dưỡng của ứng viên không đáng tin đi vào BI.
+- `categories_tags` xuất thành `off_categories`; còn `off_product_name`, `brand`, `countries_tags`,
+  `nutriscore_grade`, `nova_group`, ba cột dinh dưỡng, `image_url` và `image_path` theo hợp đồng nguồn.
+- Ảnh được gộp theo `off_code`: ưu tiên path có giá trị, modificationTime mới nhất, ingest mới nhất,
+  rồi path tăng dần khi hòa. Metadata ảnh được chọn trước join, không thể nhân dòng.
+
+### 6.3 Kiểm chất lượng và nghiệm thu
+
+Mỗi nguồn bên phải được rút về một dòng mỗi khóa trước join, giữ số bản nguồn để không che xung đột.
+Các bản snapshot giống nhau được gộp; riêng giá đang mở phải duy nhất ngay trong SCD2 target.
+Hash payload phá hòa để kết quả nhất quán. Expectation vẫn ghi nhận các payload xung đột.
+
+| Expectation | Hành động | Điều kiện |
+|---|---|---|
+| `no_fanout` | Fail | `dup_cnt = 1` sau toàn bộ join, tính bằng window theo product_id |
+| `unique_sources` | Fail | `_join_sources_unique` không có nguồn liên quan nào xung đột |
+| `valid_product_id` | Fail | Khóa sản phẩm không NULL và dương |
+| `has_price` | Warn | `current_price IS NOT NULL`; sản phẩm thiếu giá vẫn còn trong dim |
+| `catalog_payload_unique` | Warn | Mỗi khóa danh mục có một payload trong nhóm bản ghi được ưu tiên |
+| `catalog_unrescued` | Warn | Dòng products/aisles/departments được chọn không phải bản rescue |
+| `valid_catalog_product_id` | Warn | Khóa gốc ép được sang INT và lớn hơn 0; đếm trước khi chọn phiên bản |
+
+`dup_cnt` và `_join_sources_unique` ở lại bảng để expectations kiểm được, không dùng làm measure BI.
+Nguồn lỗi vẫn giữ trong bronze/silver; dim không xóa hay sửa ngược nguồn. Flow fail không có nghĩa các
+flow khác cùng update rollback; bảng dim có thể còn phiên bản thành công cũ, phải kiểm update ID.
+
+Release đầy đủ phải có **49.688 dòng / 49.688 khóa**, không phải mọi fixture đều có số này.
+Tỉ lệ `has_price` phải đo thật và báo cả tử/mẫu số; hiện **chưa nghiệm thu trên workspace**.
+Đọc [03e_nghiem_thu_dim_product.md](03e_nghiem_thu_dim_product.md) để chạy dev, đối soát, replay
+và ghi bằng chứng. AD-DE-11 (#47) và AD-DE-13 (#49) vẫn là gate hoàn tất.
 
 ## 7. Gộp batch ∪ stream và dựng `baskets`
 
