@@ -11,7 +11,10 @@
 /infra/stacks/20-stream/      @mtuan2491 @Vinh5905
 /bundles/                     @HoaiTam @mtuan2491
 /adf/                         @HoaiTam
-/src/batch/                   @HoaiTam
+/src/ingest/                  @HoaiTam
+/src/pipelines/batch/         @HoaiTam
+/src/tasks/                   @HoaiTam
+/src/pipelines/stream/        @mtuan2491
 /src/streaming/               @mtuan2491
 /powerbi/                     @P4_HANDLE
 /src/ml/                      @P4_HANDLE

@@ -44,12 +44,13 @@
 - **Hoàn tất còn cần:** Không có.
 - **Mở khóa:** [AD-DE-02](02_de_batch.md#ad-de-02) (hoàn tất), [AD-DE-03](02_de_batch.md#ad-de-03) (hoàn tất)
 
-Repo đang có khung tạm src/batch và job spark_python_task. Cần cấu trúc đích để mọi task sau đặt code đúng chỗ, và dữ liệu mẫu để viết code local trước G1.
+Cần thay khung batch và job Python tạm bằng cấu trúc đích để mọi task sau đặt code đúng chỗ,
+và dữ liệu mẫu để viết code local trước G1. Job thật được khai báo ở AD-DE-18.
 
 **Việc cần làm**
 
 1. Tạo thư mục src/ingest/{sql}, src/pipelines/{batch,stream}, src/tasks/ds_prepare, giữ src/common, src/streaming/simulator
-2. Xóa src/batch/* tạm và test liên quan, cập nhật import
+2. Xóa thư mục batch tạm và test liên quan, cập nhật import, đường dẫn bundle và CODEOWNERS
 3. Thêm dependency vào pyproject: pandas, rapidfuzz 3.*, confluent-kafka, pymssql, requests (nhóm dev/optional nếu cần)
 4. Viết script tạo mẫu 1% Instacart theo user_id (giữ trọn lịch sử mỗi khách) vào tests/fixtures/sample_1pct/ hoặc thư mục data/ đã gitignore
 5. Ghi cách dùng mẫu trong src/AGENTS.md nếu cần
@@ -63,9 +64,33 @@ Repo đang có khung tạm src/batch và job spark_python_task. Cần cấu trú
 
 **Xong khi**
 
-- [ ] uv sync và uv run pytest -q xanh
-- [ ] Không còn tham chiếu tới src/batch
-- [ ] Mẫu 1% giữ đủ prior/train/test của mỗi user được chọn
+- [x] uv sync và uv run pytest -q xanh
+- [x] Không còn tham chiếu tới thư mục batch tạm
+- [x] Mẫu 1% giữ đủ prior/train/test của mỗi user được chọn
+
+**Kết quả local AD-DE-01 (2026-11-17)**
+
+- Đã tạo cấu trúc nguồn, bỏ job Python tạm, cập nhật CODEOWNERS và đường dẫn trong tài liệu.
+- Đã khóa dependency; Kafka và driver SQL nằm trong extra `ingest` (`uv sync --extra ingest`).
+- `scripts/make_sample.py` lấy mẫu theo khách hàng, giữ nguyên lịch sử và toàn bộ danh mục;
+  có hướng dẫn trong `src/AGENTS.md`, fixture nhỏ tự dựng trong `tests/fixtures/instacart/`.
+- Đã kiểm `uv sync --frozen`, pytest: 35 test đạt; `ruff check` và `ruff format --check` sạch
+  trên Python 3.11.9, Java 17. Spark local cần quyền mở socket loopback.
+- Test mặc định 1% trên bộ 200 khách tự dựng chọn đúng 2 khách, giữ đủ mọi dòng đơn và món hàng.
+  Đã kiểm seed lặp lại, CSV có dấu phẩy/ngoặc kép, không ghi đè đích cũ và không công bố mẫu dở.
+- Đã tải đủ sáu CSV từ [Zenodo record 2654444](https://zenodo.org/records/2654444), kiểm MD5
+  từng file khớp metadata nguồn. Số dòng nguồn đúng như data dictionary: orders 3.421.083,
+  prior 32.434.489, train 1.384.617, products 49.688, aisles 134, departments 21.
+- Đã chạy mẫu thật bằng `python3 scripts/make_sample.py --input-dir data/instacart
+  --output-dir data/sample_1pct` (viết trên một dòng), tỷ lệ 0,01 và seed 42:
+  **2.063/206.209 khách, 34.538 đơn** (32.475 prior, 1.311 train, 752 test),
+  **326.492 dòng món prior, 13.665 dòng món train**; danh mục giữ nguyên toàn bộ.
+- Đối soát độc lập từng dòng với nguồn: giữ đủ mọi đơn của khách đã chọn, đủ mọi món của các đơn đó,
+  thứ tự và giá trị gốc không đổi; số dòng mẫu khớp `_manifest.json`.
+  Nguồn ở `data/instacart/`, mẫu ở `data/sample_1pct/`; `_source.json` ghi checksum nguồn,
+  `_verification.json` ghi kết quả đối soát. Toàn bộ `data/` đã gitignore.
+- **Chưa kiểm bundle trên workspace:** máy chưa có Databricks CLI/cấu hình workspace cho G1.
+  Chưa deploy; job `instacart-batch-medallion` thật sẽ bổ sung ở AD-DE-18.
 
 ### AD-DE-02
 

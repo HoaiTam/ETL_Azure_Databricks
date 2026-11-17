@@ -1,0 +1,5 @@
+product_id,product_name,aisle_id,department_id
+1,Banana,1,1
+2,"Tea, Green",2,2
+3,Strawberries,1,1
+4,"Cookies ""Classic""",2,2

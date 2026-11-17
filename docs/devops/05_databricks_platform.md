@@ -376,7 +376,9 @@ targets:
       - { level: CAN_VIEW, group_name: users }
 ```
 
-Pipeline LDP (`resources.pipelines`) khai báo ở [de/02 §2.2](../de/02_bronze_ldp.md) và [de/04 §3.1](../de/04_streaming.md); job đầy đủ ở [de/06 §2](../de/06_van_hanh_chay_lai.md). Khung dưới đây chỉ minh họa cách dùng `policy_id`.
+Pipeline LDP (`resources.pipelines`) khai báo ở [de/02 §2.2](../de/02_bronze_ldp.md) và [de/04 §3.1](../de/04_streaming.md); job đầy đủ ở [de/06 §2](../de/06_van_hanh_chay_lai.md).
+AD-DE-01 đã bỏ các task Python tạm. Đến AD-DE-08 khai báo pipeline, rồi AD-DE-18 khai báo job
+`instacart-batch-medallion` dùng `pipeline_task`; job cluster phụ trợ phải theo `policy_id`.
 
 **Phần DS trong cùng bundle** (G3 → G5):
 
@@ -397,24 +399,9 @@ variables:
 Target `sandbox` (host của workspace Sub C) **chỉ thêm khi Sub C cùng region với Sub A**, vì khi đó hai workspace dùng chung metastore ([03 §5](03_terraform_azure.md)). Target này chỉ deploy job DS.
 
 ```yaml
-# bundles/resources/jobs_batch.yml (khung; nội dung task ở tài liệu 06)
+# bundles/resources/jobs_batch.yml ở G0; nội dung job thật bổ sung ở AD-DE-18
 resources:
-  jobs:
-    batch_medallion:
-      name: instacart-batch-medallion
-      job_clusters:
-        - job_cluster_key: sn
-          new_cluster:
-            policy_id: ${var.policy_id}
-            apply_policy_default_values: true
-            custom_tags: { owner: p2 }
-      tasks:
-        - task_key: ingest_bronze
-          job_cluster_key: sn
-          spark_python_task:
-            python_file: ../src/batch/ingest_bronze.py
-            parameters: ["--catalog", "${var.catalog}"]
-        # build_silver (depends_on ingest_bronze), build_gold (depends_on build_silver): cùng mẫu
+  jobs: {}
 ```
 
 ## 5. Checklist (cổng G1)
