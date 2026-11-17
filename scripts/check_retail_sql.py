@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import secrets
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -17,12 +20,16 @@ SQLCMD = "/opt/mssql-tools18/bin/sqlcmd"
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seed", action="store_true", help="Kiểm thêm seed Python, cần extra ingest")
+    args = parser.parse_args()
     container = f"ad-de-04-test-{uuid.uuid4().hex[:12]}"
     password = f"Local!{secrets.token_hex(24)}a1"
     env = os.environ | {"MSSQL_SA_PASSWORD": password, "SQLCMDPASSWORD": password}
     sql = ["docker", "exec", container, SQLCMD, "-S", "localhost", "-U", "sa", "-C", "-b", "-l", "2"]
     try:
-        print("Khởi động SQL Server tạm (2 CPU, 3 GB RAM, không mở cổng)...", flush=True)
+        network = "cổng loopback tạm" if args.seed else "không mở cổng"
+        print(f"Khởi động SQL Server tạm (2 CPU, 3 GB RAM, {network})...", flush=True)
         # Chỉ truyền tên env qua argv; mật khẩu không nằm trong lệnh/log hay file.
         subprocess.run(
             [
@@ -31,6 +38,7 @@ def main() -> None:
                 "-d",
                 "--name",
                 container,
+                *(["-p", "127.0.0.1::1433"] if args.seed else []),
                 "--platform",
                 "linux/amd64",
                 "--memory",
@@ -72,7 +80,24 @@ def main() -> None:
         ]:
             print(f"Đang chạy {fixture}...", flush=True)
             subprocess.run(sql + ["-d", database, "-i", fixture], check=True)
-        print("Đạt: regression CDC và fallback trên SQL Server local.", flush=True)
+        if args.seed:
+            for database, files in [
+                ("retail_db_test_seed_cdc", ["01_schema.sql", "02_enable_cdc.sql", "03_etl_control.sql"]),
+                ("retail_db_test_seed_fallback", ["01_schema.sql", "04_fallback_watermark.sql"]),
+            ]:
+                subprocess.run(sql + ["-Q", f"CREATE DATABASE {database};"], check=True)
+                for file in files:
+                    subprocess.run(sql + ["-d", database, "-i", f"src/ingest/sql/{file}"], check=True)
+            address = subprocess.check_output(["docker", "port", container, "1433/tcp"], text=True).strip()
+            credentials = {"server": "127.0.0.1", "port": address.rsplit(":", 1)[1], "user": "sa", "password": password}
+            subprocess.run(
+                [sys.executable, "tests/sql/check_seed_retail_db.py"],
+                cwd=ROOT,
+                input=json.dumps(credentials),
+                text=True,
+                check=True,
+            )
+        print("Đạt: regression SQL" + (" và seed Python" if args.seed else "") + " local.", flush=True)
     finally:
         # Chỉ xóa container có tên ngẫu nhiên vừa tạo, không chạm các container khác/image cache.
         subprocess.run(["docker", "rm", "-f", container], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

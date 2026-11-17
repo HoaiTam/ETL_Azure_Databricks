@@ -18,3 +18,16 @@
 - **Việc còn treo:** `docs/de` dùng Lakeflow Declarative Pipelines (`instacart_batch`, `instacart_stream`).
   - AD-DE-08 thêm `resources/pipeline_batch.yml`; AD-ST-03 khai báo pipeline stream.
   - AD-DE-18 bổ sung job `instacart-batch-medallion` dùng `pipeline_task` và các task vận hành.
+
+## Job seed (AD-DE-05)
+
+- `resources/jobs_ingest.yml` tạo resource `seed_retail_db`, chạy tay và không có schedule.
+  Dùng classic single-node theo yêu cầu task/runtime 15.4/policy của repo, không tự đổi compute.
+- Một run, một wave; không chạy đồng thời với ADF hoặc các job dùng chung quota 4 vCPU.
+  Thư viện `pymssql==2.4.6` khớp lockfile, mật khẩu đọc từ scope `kv` trong code.
+- `server` mặc định rỗng, người chạy truyền bằng job parameter; không ghi endpoint riêng vào YAML.
+  Dev/prod chỉ tách tên job, không tách database nguồn; kiểm `server`/`database` trước khi chạy.
+- `products_csv` phải là danh mục thật đủ 49.688 sản phẩm; xem `src/ingest/README.md`.
+  Chưa deploy/chạy dev khi AD-DE-04 hoặc AD-OPS-22 chưa nghiệm thu.
+- Spike #141 xác nhận job cluster không nhận `autotermination_minutes`. Giữ `apply_policy_default_values: true`
+  theo quy định repo, nhưng P1 phải cấp policy không áp default thuộc tính này cho job trước khi chạy dev.

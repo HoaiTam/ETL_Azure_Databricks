@@ -62,6 +62,18 @@
 - Kiểm tích hợp SQL: `python3 scripts/check_retail_sql.py` (cần Docker), tách khỏi pytest/Spark.
   Chỉ dùng database/container tạm; nghiệm thu Azure bằng admin Entra chờ AD-OPS-12 và AD-OPS-06.
 
+## Seed nguồn SQL (AD-DE-05)
+
+- `ingest/seed_retail_db.py`: sinh kế hoạch thuần bằng `generate_wave`, áp dụng bằng `apply_wave`.
+  Đọc `ingest/README.md`; wave 0–4 phải tuần tự, giữ nguyên seed/danh mục/chế độ.
+- Application lock và marker `etl.seed_wave` nằm cùng transaction với DML. Không commit từng batch,
+  không xóa marker để ép retry; không seed cùng ADF. Nhánh soft delete không dùng DELETE vật lý.
+- Đường chạy thật chỉ đọc mật khẩu qua `dbutils.secrets.get("kv", "sql-admin-password")`.
+  `--dry-run` không cần Spark, SQL hay secret; mặc định cần danh mục đủ 49.688 sản phẩm.
+- Job chạy tay `seed_retail_db` trong `jobs_ingest.yml`, dùng policy single-node; tên dev/prod không tách database.
+- Kiểm: `uv run pytest tests/test_seed_retail_db.py -q`; kiểm SQL thật bằng
+  `uv run --extra ingest python scripts/check_retail_sql.py --seed` (Docker, cổng loopback tạm, tự dọn).
+
 ## Dữ liệu mẫu cho phát triển local
 
 - Fixture nhỏ tự dựng ở `tests/fixtures/instacart/`, gồm đủ sáu CSV; không phải dữ liệu thật.

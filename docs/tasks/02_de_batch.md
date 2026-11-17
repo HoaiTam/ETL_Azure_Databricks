@@ -288,6 +288,26 @@ CDC cần insert, update, delete thật. Script sinh giá và khuyến mãi theo
 - [ ] Chạy lại wave 0 in 'đã áp dụng, bỏ qua'
 - [ ] Sau wave 1: có update giá và delete khuyến mãi trong cdc.fn_cdc_get_all_changes
 
+**Kết quả chuẩn bị AD-DE-05 (2026-11-17)**
+
+- Đã viết `src/ingest/seed_retail_db.py`: kế hoạch thuần cho wave 0–4, sinh giá Decimal theo ngành hàng,
+  khuyến mãi có mã không tái dùng; thứ tự CSV không ảnh hưởng kết quả cùng seed.
+- Mỗi đợt giữ một transaction, khóa ứng dụng và marker `etl.seed_wave` chứa fingerprint;
+  chạy lại không nhân dữ liệu, không cho bỏ wave hoặc đổi seed/danh mục/kế hoạch/chế độ.
+  Hỗ trợ CDC và soft delete, mật khẩu đường chạy thật chỉ đọc từ scope `kv`.
+- `bundles/resources/jobs_ingest.yml`: job chạy tay `seed_retail_db`, tham số wave/đích/CSV,
+  cluster theo policy, một run, retry an toàn, pin `pymssql==2.4.6`.
+- **21 test seed**, toàn bộ **118 test Python**, Ruff và parse YAML đều đạt.
+  Regression SQL Server 2022 CU28 local đạt cho cả 5 wave ở hai chế độ với 49.688 mã tự dựng:
+  wave 0 có 49.688 giá/3.000 khuyến mãi; wave 1 có 2.484 giá UPDATE, 300 INSERT, 50 gia hạn, 30 hủy;
+  đã kiểm CDC thật, lỗi giữa đợt rollback toàn bộ và hai connection đồng thời chỉ áp dụng một lần.
+- Dry-run trên `data/instacart/products.csv` thật xác nhận 49.688 sản phẩm; regression SQL dùng dữ liệu
+  tự dựng, không phải đã seed danh mục thật lên Azure. Runner/CI bổ sung tùy chọn `--seed`, tự dọn Docker.
+- **Chưa nghiệm thu G1:** AD-DE-04 (#140) và AD-OPS-22 (#24) chưa hoàn tất;
+  chưa deploy/chạy dev, chưa kiểm bundle bằng CLI/workspace hoặc đọc secret thật.
+  Spike #141 cho biết CDC free offer đã đạt; policy job vẫn cần P1 xử lý default `autotermination_minutes`
+  trước khi dùng `apply_policy_default_values: true`. Giữ ba tiêu chí nghiệm thu Azure ở trên chưa tick.
+
 ### AD-DE-06
 
 **Dựng ADF pl_ingest_instacart chép CSV Zenodo vào landing**
