@@ -24,6 +24,7 @@
 - `resources/jobs_ingest.yml` tạo resource `seed_retail_db`, chạy tay và không có schedule.
   Dùng classic single-node theo yêu cầu task/runtime 15.4/policy của repo, không tự đổi compute.
 - Một run, một wave; không chạy đồng thời với ADF hoặc các job dùng chung quota 4 vCPU.
+  Không tự retry lỗi seed; sau khi sửa cấu hình có thể chạy tay lại an toàn.
   Thư viện `pymssql==2.4.6` khớp lockfile, mật khẩu đọc từ scope `kv` trong code.
 - `server` mặc định rỗng, người chạy truyền bằng job parameter; không ghi endpoint riêng vào YAML.
   Dev/prod chỉ tách tên job, không tách database nguồn; kiểm `server`/`database` trước khi chạy.
@@ -31,3 +32,6 @@
   Chưa deploy/chạy dev khi AD-DE-04 hoặc AD-OPS-22 chưa nghiệm thu.
 - Spike #141 xác nhận job cluster không nhận `autotermination_minutes`. Giữ `apply_policy_default_values: true`
   theo quy định repo, nhưng P1 phải cấp policy không áp default thuộc tính này cho job trước khi chạy dev.
+
+- Xác thực seed chưa chốt ở #14: SQL login hiện tại không chạy trên server Entra-only của spike.
+  Không nghiệm thu job trước khi P1 xác nhận SQL auth hoặc chọn driver/token Entra phù hợp.

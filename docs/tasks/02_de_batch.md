@@ -8,7 +8,7 @@
 | [AD-DE-02](#ad-de-02) | Viết hàm thuần sim_time và chuẩn hóa tên kèm test | P2 | G0 | Chuẩn bị ngay; Hoàn tất: AD-DE-01 | [#38](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/38) |
 | [AD-DE-03](#ad-de-03) | Viết khuôn quarantine và bộ luật chất lượng dùng chung | P2 | G0 | Chuẩn bị ngay; Hoàn tất: AD-DE-01 | [#39](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/39) |
 | [AD-DE-04](#ad-de-04) | Viết script SQL tạo bảng nguồn, bật CDC và bảng điều khiển etl | P2 | G1 | Chuẩn bị ngay; Hoàn tất: AD-OPS-12, AD-OPS-06 | [#40](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/40) |
-| [AD-DE-05](#ad-de-05) | Viết seed_retail_db theo đợt và job chạy seed | P2 | G1 | Chuẩn bị ngay; Hoàn tất: AD-DE-04, AD-OPS-22 | [#41](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/41) |
+| [AD-DE-05](#ad-de-05) | Viết seed_retail_db theo đợt và job chạy seed | P2 | G1 | Chuẩn bị ngay; Hoàn tất: AD-DE-04, AD-DE-06, AD-OPS-22 | [#41](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/41) |
 | [AD-DE-06](#ad-de-06) | Dựng ADF pl_ingest_instacart chép CSV Zenodo vào landing | P2 | G1 | Chuẩn bị ngay; Hoàn tất: AD-OPS-25 | [#42](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/42) |
 | [AD-DE-07](#ad-de-07) | Dựng ADF pl_ingest_retail_db đọc CDC theo LSN | P2 | G1 | Bắt đầu: AD-DE-04; Hoàn tất: AD-DE-05, AD-OPS-25 | [#43](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/43) |
 | [AD-DE-08](#ad-de-08) | Khai báo pipeline instacart_batch trong DAB với schema dev riêng | P2 | G1 | Chuẩn bị ngay; Hoàn tất: AD-OPS-19, AD-OPS-21, AD-OPS-20, AD-OPS-05 | [#44](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/44) |
@@ -263,7 +263,7 @@ CDC theo LSN cần bảng nguồn, CDC bật trên 2 bảng, watermark và nhậ
 - Issue: [#41](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/41)
 - Tài liệu: `docs/de/01_ingest_landing.md §3.4`, `docs/devops/06_de_den_dashboard.md §2.1, §3`
 - **Bắt đầu sau:** Không có.
-- **Hoàn tất còn cần:** [AD-DE-04](02_de_batch.md#ad-de-04) [#40](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/40), [AD-OPS-22](01_devops.md#ad-ops-22) [#24](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/24)
+- **Hoàn tất còn cần:** [AD-DE-04](02_de_batch.md#ad-de-04) [#40](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/40), [AD-DE-06](02_de_batch.md#ad-de-06) [#42](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/42), [AD-OPS-22](01_devops.md#ad-ops-22) [#24](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/24)
 - **Mở khóa:** [AD-DE-07](02_de_batch.md#ad-de-07) (hoàn tất)
 
 CDC cần insert, update, delete thật. Script sinh giá và khuyến mãi theo đợt 0–4, tất định theo seed, chạy lại không áp dụng hai lần.
@@ -308,6 +308,10 @@ CDC cần insert, update, delete thật. Script sinh giá và khuyến mãi theo
   Spike #141 cho biết CDC free offer đã đạt; policy job vẫn cần P1 xử lý default `autotermination_minutes`
   trước khi dùng `apply_policy_default_values: true`. Giữ ba tiêu chí nghiệm thu Azure ở trên chưa tick.
 
+**Bổ sung sau review:** kiểm fingerprint mọi wave trước khi áp dụng đợt mới; giữ lỗi gốc nếu rollback/close lỗi.
+Job không tự retry và chưa nghiệm thu xác thực: SQL login hiện tại không dùng được nếu #14 giữ Entra-only
+như spike #141. Cần P1 chốt SQL auth hoặc driver/token Entra; CSV mặc định còn chờ AD-DE-06.
+
 ### AD-DE-06
 
 **Dựng ADF pl_ingest_instacart chép CSV Zenodo vào landing**
@@ -318,7 +322,7 @@ CDC cần insert, update, delete thật. Script sinh giá và khuyến mãi theo
 - Tài liệu: `docs/de/01_ingest_landing.md §1, §2`, `docs/devops/06_de_den_dashboard.md §1`
 - **Bắt đầu sau:** Không có.
 - **Hoàn tất còn cần:** [AD-OPS-25](01_devops.md#ad-ops-25) [#27](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/27)
-- **Mở khóa:** [AD-OPS-26](01_devops.md#ad-ops-26) (hoàn tất), [AD-DE-09](02_de_batch.md#ad-de-09) (hoàn tất)
+- **Mở khóa:** [AD-OPS-26](01_devops.md#ad-ops-26) (hoàn tất), [AD-DE-09](02_de_batch.md#ad-de-09) (hoàn tất), [AD-DE-05](02_de_batch.md#ad-de-05) (hoàn tất)
 
 Bước 1 của luồng: 6 file Instacart vào landing/instacart/<bảng>/release=2017/, theo khuôn staging → công bố → _SUCCESS để chạy lại an toàn.
 

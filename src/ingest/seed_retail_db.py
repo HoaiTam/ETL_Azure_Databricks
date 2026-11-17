@@ -7,6 +7,7 @@ import csv
 import hashlib
 import json
 import random
+from contextlib import suppress
 from dataclasses import asdict, astuple, dataclass
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -43,10 +44,14 @@ class Wave:
     promo_inserts: tuple[Promotion, ...]
     promo_extensions: tuple
     promo_deletes: tuple[str, ...]
+    previous_plan_hashes: tuple[str, ...] = ()
 
     @property
     def fingerprint(self) -> str:
-        return _digest(asdict(self))
+        # Metadata lịch sử không làm đổi fingerprint đã ghi của chính wave này.
+        payload = asdict(self)
+        payload.pop("previous_plan_hashes")
+        return _digest(payload)
 
 
 def _digest(value) -> str:
@@ -82,6 +87,7 @@ def generate_wave(products, wave: int, seed: int = 42) -> Wave:
     products = _canonical_products(products)
     products_hash = _digest([astuple(p) for p in products])
     active: dict[str, Promotion] = {}
+    previous_hashes = []
     for current in range(wave + 1):
         rng = random.Random(seed + current)
         ts = datetime(2015, 1, 1) if current == 0 else datetime(2026, 2, 22) + timedelta(days=7 * current)
@@ -127,7 +133,20 @@ def generate_wave(products, wave: int, seed: int = 42) -> Wave:
             )
             promos.append(promo)
             active[promo.promo_id] = promo
-    return Wave(wave, seed, len(products), products_hash, prices, updates, tuple(promos), extensions, deletes)
+        plan = Wave(
+            current,
+            seed,
+            len(products),
+            products_hash,
+            prices,
+            updates,
+            tuple(promos),
+            extensions,
+            deletes,
+            tuple(previous_hashes),
+        )
+        previous_hashes.append(plan.fingerprint)
+    return plan
 
 
 def apply_wave(connection, plan: Wave, source_mode: str = "cdc") -> bool:
@@ -155,15 +174,26 @@ def apply_wave(connection, plan: Wave, source_mode: str = "cdc") -> bool:
         """)
         cursor.execute("SELECT wave, seed, products_hash, plan_hash, source_mode FROM etl.seed_wave ORDER BY wave")
         history = cursor.fetchall()
+        if [row[0] for row in history] != list(range(len(history))):
+            raise ValueError("Lịch sử wave không liên tiếp; cần đối soát")
+        already_applied = False
         for previous in history:
             if previous[1] != plan.seed or previous[2] != plan.products_hash or previous[4] != source_mode:
                 raise ValueError("Seed, danh mục hoặc chế độ nguồn khác các đợt đã áp dụng")
-            if previous[0] == plan.wave:
+            if previous[0] < plan.wave:
+                if (
+                    previous[0] >= len(plan.previous_plan_hashes)
+                    or previous[3] != plan.previous_plan_hashes[previous[0]]
+                ):
+                    raise ValueError("Fingerprint wave trước khác kế hoạch tái lập; không áp dụng đợt mới")
+            elif previous[0] == plan.wave:
                 if previous[3] != plan.fingerprint:
                     raise ValueError("Kế hoạch khác đợt đã áp dụng; không chạy lại bằng phiên bản khác")
-                connection.rollback()
-                return False
-        if [row[0] for row in history] != list(range(plan.wave)):
+                already_applied = True
+        if already_applied:
+            connection.rollback()
+            return False
+        if len(history) != plan.wave:
             raise ValueError("Phải áp dụng tuần tự wave 0, 1, 2, 3, 4")
         cursor.execute("SELECT is_cdc_enabled FROM sys.databases WHERE database_id = DB_ID()")
         cdc = cursor.fetchone()[0]
@@ -244,10 +274,13 @@ def apply_wave(connection, plan: Wave, source_mode: str = "cdc") -> bool:
         connection.commit()
         return True
     except BaseException:
-        connection.rollback()
+        # Kết nối đứt có thể làm rollback/close lỗi; giữ nguyên exception gốc để debug.
+        with suppress(Exception):
+            connection.rollback()
         raise
     finally:
-        cursor.close()
+        with suppress(Exception):
+            cursor.close()
 
 
 def _execute_batches(cursor, statement, rows, batch_size=500):
@@ -316,7 +349,8 @@ def main(argv=None) -> None:
     try:
         applied = apply_wave(connection, plan, args.source_mode)
     finally:
-        connection.close()
+        with suppress(Exception):
+            connection.close()
     print(f"wave {args.wave}: áp dụng thành công" if applied else f"wave {args.wave} đã áp dụng, bỏ qua")
 
 

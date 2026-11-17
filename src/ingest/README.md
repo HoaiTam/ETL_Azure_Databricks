@@ -6,6 +6,8 @@
 ## Điều kiện
 
 - AD-DE-04 (#40, PR #140): cài schema nguồn và chọn đúng CDC hoặc timestamp + soft delete.
+- AD-DE-06 (#42, PR #144): landing CSV danh mục theo đường dẫn mặc định. Nếu truyền `products_csv` khác,
+  người vận hành vẫn phải cấp CSV thật và quyền đọc trước khi nghiệm thu.
 - AD-OPS-22 (#24): policy `instacart-single-node`, quyền dùng cluster/đọc volume và secret scope `kv`
   có key `sql-admin-password`. Người chạy job phải có quyền đọc key; mật khẩu không truyền qua tham số.
 - CSV `products.csv` đủ **49.688** sản phẩm, `product_id` duy nhất và `department_id` hợp lệ.
@@ -35,6 +37,7 @@ Mã khuyến mãi không tái dùng. Các đợt sau chỉ chọn gia hạn/hủ
 - DML theo lô tối đa 500 câu gửi SQL, **không commit từng lô**. Marker và toàn bộ DML cùng commit;
   lỗi ở giữa rollback tất cả. Không dùng bulk-copy tự commit theo batch.
 - Retry cùng đầu vào in `wave N đã áp dụng, bỏ qua`, kể cả retry wave cũ sau wave mới hơn.
+  Fingerprint của từng wave trước cũng phải khớp kế hoạch được tái sinh bằng thuật toán hiện tại.
   Đổi seed/danh mục/kế hoạch/chế độ khi đã có marker bị từ chối; không tự reset để seed lại.
 - CDC hủy bằng DELETE thật; `soft-delete` giữ tombstone và cập nhật `is_deleted = 1, updated_at = thời gian wave`.
   Không trộn hai chế độ trong cùng lịch sử seed.
@@ -62,12 +65,11 @@ Chọn `server`/`database` đúng nguồn được cấp; dùng database thử r
 
 Theo yêu cầu repo, job dùng classic single-node qua `${var.policy_id}` và
 `apply_policy_default_values: true`, có `custom_tags.owner = p2`; runtime/số node/loại máy do policy quyết định.
-Không mở pool, không tự chọn VM. Job tối đa một run, timeout 30 phút, retry một lần sau 30 giây.
+Không mở pool, không tự chọn VM. Job tối đa một run, timeout 30 phút, không tự retry (`max_retries: 0`); lỗi cấu hình phải được sửa trước khi chạy tay lại.
 **Điều kiện policy trước khi chạy:** spike ghi trong `docs/devops/spike_results.md` xác nhận automated cluster
 không nhận `autotermination_minutes`. P1 phải cấp policy tương thích job, không tự áp default thuộc tính này;
 nếu policy vẫn có default đó, job với `apply_policy_default_values: true` sẽ bị từ chối.
 Không tự bỏ policy/đổi VM để chạy vòng qua. Job cluster được Databricks dừng khi job kết thúc.
-`performance_target: STANDARD` áp dụng nếu sau này đổi sang serverless; job hiện dùng classic theo task/policy.
 Thư viện `pymssql==2.4.6` khớp lockfile; kết nối yêu cầu TLS, `datetime2` và không autocommit.
 
 Sau khi hạ tầng, CLI và profile đã được cấu hình, chạy trong `bundles/`:
@@ -79,6 +81,12 @@ databricks bundle run seed_retail_db -t dev --profile <profile> --params "wave=0
 ```
 
 `RETAIL_SQL_SERVER` do người vận hành đặt trong shell từ output hạ tầng, không đưa giá trị thật vào Git.
+**Chưa chốt xác thực ở #14:** code hiện dùng SQL login `sqladmin` và secret `sql-admin-password`.
+Spike #141 tạo server chỉ Entra (`--enable-ad-only-auth`), nên SQL login sẽ thất bại nếu cấu hình này
+được giữ ở 10-core. Chưa được nghiệm thu/chạy job trước khi P1 chốt: cấp SQL auth hoặc giữ Entra-only
+và thay driver sang `pyodbc`/`mssql-python` nhận token SP/MI (`pymssql` không nhận access token).
+PR hiện chỉ ghi rủi ro, chưa đổi cấu hình server hay tự chọn danh tính xác thực.
+
 Job mặc định để server rỗng để tránh kết nối nhầm; truyền thêm `user` nếu tài khoản khác `sqladmin`.
 Đường dẫn CSV mặc định là `/Volumes/<catalog>/landing_meta/raw/instacart/products/release=2017/products.csv`;
 tham số `products_csv` có thể trỏ CSV thật khác. Với nhánh dự phòng thêm `source_mode=soft-delete`.
@@ -105,6 +113,7 @@ uv run --extra ingest python scripts/check_retail_sql.py --seed
   container/cổng được dọn trong `finally`. Không kết nối Azure hoặc database có sẵn.
 - Workflow `retail-sql-checks` cài extra ingest và chạy cùng lệnh. Pytest và regression SQL là hai nhóm riêng.
 - Local/CI không thay thế nghiệm thu job dev, secret scope và Azure SQL free offer.
-  Hiện chờ #40/#24 và kiểm policy tương thích job; chưa deploy/chạy dev hoặc tạo chi phí cloud.
+  Hiện chờ #40/#24/#42, P1 chốt xác thực và kiểm policy tương thích job;
+  chưa deploy/chạy dev hoặc tạo chi phí cloud.
 
 Tham chiếu driver: [pymssql](https://pymssql.readthedocs.io/en/stable/ref/pymssql.html).

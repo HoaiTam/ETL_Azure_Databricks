@@ -25,6 +25,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --frozen --extra ingest
+      - run: uv sync --frozen --extra ingest --no-dev
       - name: Kiểm CDC, fallback và seed trên database tạm
-        run: uv run --frozen --extra ingest python scripts/check_retail_sql.py --seed
+        run: uv run --frozen --extra ingest --no-dev python scripts/check_retail_sql.py --seed

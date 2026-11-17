@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import astuple
+from dataclasses import astuple, replace
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -11,7 +11,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from ingest.seed_retail_db import Product, connect_from_secret, generate_wave, load_products, main
+from ingest.seed_retail_db import Product, apply_wave, connect_from_secret, generate_wave, load_products, main
 
 PRODUCTS = tuple(Product(i, (i - 1) % 21 + 1) for i in range(1, 49689))
 
@@ -130,3 +130,42 @@ def test_input_digest_covers_department_and_not_only_product_id():
     b = generate_wave([Product(1, 5)], 0)
     assert a.products_hash != b.products_hash
     assert astuple(a.promo_inserts[0])[-1] == datetime(2015, 1, 1)
+
+
+def test_next_wave_recomputes_fingerprints_of_every_earlier_wave():
+    products = PRODUCTS[:200]
+    plans = [generate_wave(products, wave) for wave in range(5)]
+    for index, plan in enumerate(plans):
+        assert plan.previous_plan_hashes == tuple(p.fingerprint for p in plans[:index])
+        # Metadata truyền kèm không làm thay đổi marker đã ghi của chính wave.
+        assert replace(plan, previous_plan_hashes=()).fingerprint == plan.fingerprint
+
+
+@pytest.mark.parametrize("changed_wave", [0, 1])
+def test_previous_algorithm_drift_is_rejected_before_source_writes(changed_wave):
+    products = PRODUCTS[:200]
+    plans = [generate_wave(products, wave) for wave in range(3)]
+    connection = Mock()
+    cursor = connection.cursor.return_value
+    history = [(p.wave, p.seed, p.products_hash, p.fingerprint, "cdc") for p in plans[:2]]
+    old = history[changed_wave]
+    history[changed_wave] = (*old[:3], "0" * 64, old[4])
+    cursor.fetchall.return_value = history
+    with pytest.raises(ValueError, match="Fingerprint wave trước"):
+        apply_wave(connection, plans[2])
+    connection.commit.assert_not_called()
+    connection.rollback.assert_called_once()
+    cursor.executemany.assert_not_called()
+
+
+def test_connection_cleanup_errors_do_not_hide_the_original_seed_error():
+    connection = Mock()
+    cursor = connection.cursor.return_value
+    original = RuntimeError("mất kết nối khi ghi")
+    cursor.execute.side_effect = original
+    connection.rollback.side_effect = RuntimeError("rollback không kết nối được")
+    cursor.close.side_effect = RuntimeError("close không kết nối được")
+    with pytest.raises(RuntimeError) as caught:
+        apply_wave(connection, generate_wave(PRODUCTS[:200], 0))
+    assert caught.value is original
+    connection.commit.assert_not_called()

@@ -5,10 +5,8 @@ resources:
       name: seed-retail-db
       max_concurrent_runs: 1
       timeout_seconds: 1800
-      performance_target: STANDARD
       tags:
         owner: p2
-        aidevkit_project: ai-dev-kit
       parameters:
         - name: wave
           default: "0"
@@ -34,8 +32,7 @@ resources:
       tasks:
         - task_key: seed
           job_cluster_key: seed_cluster
-          max_retries: 1
-          min_retry_interval_millis: 30000
+          max_retries: 0
           spark_python_task:
             python_file: ../../src/ingest/seed_retail_db.py
             parameters:

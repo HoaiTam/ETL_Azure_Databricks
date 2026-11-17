@@ -118,6 +118,21 @@ def check_database(credentials, mode):
 
         # Hai connection cùng áp dụng một đợt: chỉ một connection thực sự ghi.
         third = generate_wave(PRODUCTS, 2)
+        # Mô phỏng marker từ thuật toán wave trước khác phiên bản hiện tại.
+        for previous in (first, second):
+            cur.execute("UPDATE etl.seed_wave SET plan_hash = %s WHERE wave = %s", ("0" * 64, previous.wave))
+            try:
+                apply_wave(writer, third, mode)
+                raise AssertionError("Phải kiểm fingerprint từng wave trước")
+            except ValueError as error:
+                assert "Fingerprint wave trước" in str(error)
+            assert snapshot() == after_second
+            cur.execute("SELECT COUNT(*) FROM etl.seed_wave")
+            assert cur.fetchone()[0] == 2
+            cur.execute(
+                "UPDATE etl.seed_wave SET plan_hash = %s WHERE wave = %s", (previous.fingerprint, previous.wave)
+            )
+        print(f"PASS {mode}: sai fingerprint wave 0 hoặc 1 chặn wave 2 trước khi ghi nguồn", flush=True)
 
         def parallel_seed(_):
             connection = connect()
