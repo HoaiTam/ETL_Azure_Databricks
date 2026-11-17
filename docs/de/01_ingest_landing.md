@@ -109,91 +109,34 @@ CREATE TABLE dbo.promotions (
 
 ### 3.3 Bật CDC và tạo bảng điều khiển
 
-Chạy một lần bằng tài khoản admin Entra của server (`sqlcmd` hoặc Query editor trên Portal). Azure SQL Database có bộ lập lịch CDC riêng, **không cần SQL Agent**.
+Chạy bằng tài khoản admin Entra của server sau khi AD-OPS-12 cấp `retail_db` và AD-OPS-06
+chốt nhánh CDC. Azure SQL Database có scheduler CDC riêng, **không cần SQL Agent**.
+Script thực thi và cách chạy ở [src/ingest/sql/README.md](../../src/ingest/sql/README.md):
+
+1. `01_schema.sql`: tạo `product_prices`, `promotions` nếu chưa có, giữ nguyên dữ liệu cũ.
+2. `02_enable_cdc.sql`: bật CDC nếu chưa bật, tạo đúng `dbo_product_prices`, `dbo_promotions`,
+   đặt retention **10.080 phút (7 ngày)** và in trạng thái kiểm tra.
+3. `03_etl_control.sql`: tạo `etl.cdc_watermark`, `etl.run_log` và hai procedure, không reset mốc khi chạy lại.
 
 ```sql
--- src/ingest/sql/02_enable_cdc.sql
-EXEC sys.sp_cdc_enable_db;
-
-EXEC sys.sp_cdc_enable_table
-     @source_schema = N'dbo', @source_name = N'product_prices',
-     @role_name = NULL, @supports_net_changes = 1;
-
-EXEC sys.sp_cdc_enable_table
-     @source_schema = N'dbo', @source_name = N'promotions',
-     @role_name = NULL, @supports_net_changes = 1;
-
--- Giữ thay đổi 7 ngày (mặc định 3 ngày) để có thời gian sửa lỗi pipeline
-EXEC sys.sp_cdc_change_job @job_type = N'cleanup', @retention = 10080;   -- phút
-
--- Kiểm tra
-SELECT name, is_cdc_enabled FROM sys.databases WHERE name = DB_NAME();
-SELECT capture_instance, start_lsn FROM cdc.change_tables;  -- dbo_product_prices, dbo_promotions
+EXEC etl.usp_get_cdc_window @capture_instance = N'dbo_product_prices';
+EXEC etl.usp_get_cdc_window @capture_instance = N'dbo_promotions';
 ```
 
-> **Spike bắt buộc:** chưa có tài liệu chính thức xác nhận CDC chạy được trên DB *free offer* (serverless General Purpose).
-> Nếu `sp_cdc_enable_db` báo lỗi tier, dùng phương án dự phòng ở mục 3.7.
+Lookup trả một dòng `mode`, `from_lsn`, `to_lsn`:
 
-```sql
--- src/ingest/sql/03_etl_control.sql
-CREATE SCHEMA etl;
-GO
-CREATE TABLE etl.cdc_watermark (
-    capture_instance sysname    NOT NULL PRIMARY KEY,
-    last_lsn         binary(10) NULL,           -- NULL = chưa từng chạy
-    updated_at       datetime2  NOT NULL DEFAULT sysutcdatetime()
-);
-INSERT INTO etl.cdc_watermark(capture_instance) VALUES ('dbo_product_prices'), ('dbo_promotions');
+- `snapshot`: lần đầu hoặc `increment(last_lsn) < min_lsn`, `from_lsn = NULL`.
+- `window`: đọc inclusive từ `increment(last_lsn)` tới max LSN đã capture.
+- `empty`: max LSN bằng mốc hiện tại, `from_lsn = NULL`; setter chỉ ghi log và giữ mốc.
 
-CREATE TABLE etl.run_log (
-    adf_run_id       varchar(64)  NOT NULL,
-    capture_instance sysname      NOT NULL,
-    mode             varchar(10)  NOT NULL,     -- snapshot | window | empty
-    from_lsn         varchar(22)  NULL,
-    to_lsn           varchar(22)  NOT NULL,
-    rows_copied      bigint       NULL,
-    finished_at      datetime2    NOT NULL DEFAULT sysutcdatetime()
-);
-GO
+CDC chưa sẵn sàng/không truy cập được instance phải báo lỗi để thử lại, không ghi watermark LSN 0.
+`etl.usp_set_cdc_watermark` giữ hợp đồng tham số ở §3.5; kiểm định dạng, khóa mốc theo capture instance,
+không cho cửa sổ cũ/bỏ khoảng trống/hạ mốc. Update mốc và log trong cùng transaction;
+retry cùng `(adf_run_id, capture_instance)` và nội dung là no-op, khác nội dung báo lỗi.
+Chỉ gọi setter sau khi công bố landing và xóa staging thành công.
 
--- Tính "cửa sổ" LSN cần đọc. Trả về một dòng cho ADF Lookup.
-CREATE OR ALTER PROCEDURE etl.usp_get_cdc_window @capture_instance sysname
-AS
-BEGIN
-    SET NOCOUNT ON;
-    DECLARE @last binary(10) = (SELECT last_lsn FROM etl.cdc_watermark
-                                WHERE capture_instance = @capture_instance);
-    DECLARE @min  binary(10) = sys.fn_cdc_get_min_lsn(@capture_instance);
-    DECLARE @max  binary(10) = sys.fn_cdc_get_max_lsn();
-    DECLARE @from binary(10) = CASE WHEN @last IS NULL THEN NULL
-                                    ELSE sys.fn_cdc_increment_lsn(@last) END;
-
-    SELECT
-        mode = CASE
-                 WHEN @last IS NULL OR @last < @min THEN 'snapshot'   -- lần đầu, hoặc đã quá retention
-                 WHEN @from > @max                  THEN 'empty'      -- không có gì mới
-                 ELSE 'window' END,
-        from_lsn = CONVERT(varchar(22), @from, 1),                   -- dạng '0x0000002A000001F80003'
-        to_lsn   = CONVERT(varchar(22), @max, 1);
-END;
-GO
-
--- Chỉ gọi sau khi dữ liệu đã được công bố lên landing.
-CREATE OR ALTER PROCEDURE etl.usp_set_cdc_watermark
-    @capture_instance sysname, @to_lsn varchar(22),
-    @adf_run_id varchar(64), @mode varchar(10), @from_lsn varchar(22) = NULL, @rows bigint = NULL
-AS
-BEGIN
-    SET NOCOUNT ON;
-    BEGIN TRAN;
-      UPDATE etl.cdc_watermark
-         SET last_lsn = CONVERT(binary(10), @to_lsn, 1), updated_at = sysutcdatetime()
-       WHERE capture_instance = @capture_instance;
-      INSERT INTO etl.run_log(adf_run_id, capture_instance, mode, from_lsn, to_lsn, rows_copied)
-      VALUES (@adf_run_id, @capture_instance, @mode, @from_lsn, @to_lsn, @rows);
-    COMMIT;
-END;
-```
+**Spike free offer vẫn bắt buộc (#8):** đã có regression SQL Server local, chưa phải bằng chứng Azure SQL
+free offer chạy được CDC bằng admin Entra. Nếu spike chọn dự phòng, dùng §3.7 và không chạy 02/03.
 
 LSN được truyền qua ADF dưới dạng **chuỗi hex cố định 22 ký tự** (`0x` + 20 chữ số hex). Chuỗi cùng độ dài thì so sánh theo thứ tự chữ cũng chính là so sánh theo số. Nhờ vậy ở silver có thể dùng chuỗi này trực tiếp trong `SEQUENCE BY`.
 
@@ -329,17 +272,27 @@ Nhánh `snapshot`:
 | Copy lỗi giữa chừng | Watermark **chưa** tăng. File dở chỉ nằm trong `_staging` | Chạy lại đọc **cùng** cửa sổ từ `from_lsn` cũ → không mất |
 | Lỗi sau khi công bố, trước khi gọi SP | Dữ liệu đã ở `window=A_B`, watermark chưa tăng | *Rerun from failed activity*: ADF giữ output của `lk_window` → chỉ chạy lại SP → không đọc lại |
 | Chạy lại **toàn bộ** pipeline sau lỗi như trên | `lk_window` tính lại: `from` cũ, `to` mới lớn hơn → thư mục `window=A_C` chứa lại các thay đổi của `A_B` | Bronze có **bản sao** của các thay đổi. Silver loại trùng theo `(_lsn, _seqval, khóa)` trước khi `AUTO CDC` ([03 §2.2](03_silver_cdc_scd_dq.md)) |
-| Pipeline dừng lâu hơn retention (7 ngày) | `last_lsn < min_lsn` → `mode = snapshot` | Chụp lại toàn bảng. Silver SCD2 xem như upsert; khoảng thay đổi bị mất được ghi nhận trong `etl.run_log` |
+| Pipeline dừng lâu hơn retention (7 ngày) | `increment(last_lsn) < min_lsn` → `mode = snapshot` | Chụp lại toàn bảng. Silver SCD2 xem như upsert; khoảng thay đổi bị mất được ghi nhận trong `etl.run_log` |
 
 ### 3.7 Dự phòng nếu không bật được CDC
 
-Dùng watermark `updated_at` kèm **soft delete**:
-- Thêm cột `is_deleted bit`. Script seed không `DELETE` mà đặt `is_deleted = 1, updated_at = …`.
-- Copy chạy `WHERE updated_at > @last_ts AND updated_at <= @to_ts`, trong đó `@to_ts = sysutcdatetime()` được lấy một lần ở Lookup.
-- Silver giữ nguyên `AUTO CDC`, chỉ đổi điều kiện:
-  - `SEQUENCE BY updated_at`.
-  - `APPLY AS DELETE WHEN is_deleted = 1`.
-- Ghi rõ trong báo cáo vì sao không phải CDC log-based.
+Dùng `01_schema.sql` → `04_fallback_watermark.sql` **thay cho** 02/03.
+Script thêm `is_deleted bit NOT NULL DEFAULT 0`, tạo `etl.ts_watermark`, `etl.ts_run_log`
+và hai procedure `usp_get_ts_window`, `usp_set_ts_watermark`.
+Không trộn nhánh này với CDC đang bật; không tự disable CDC hoặc reset mốc.
+
+- Seed không `DELETE` mà đặt `is_deleted = 1, updated_at = @wave_ts`; INSERT dùng danh sách cột tường minh.
+- Lookup trả `mode`, `from_ts`, `to_ts`. Snapshot đọc toàn bảng cả tombstone;
+  window đọc `updated_at > @from_ts AND updated_at <= @to_ts`; empty chỉ ghi log.
+- **Dùng `MAX(updated_at)` của nguồn làm mốc trên**, không dùng giờ máy vì nguồn dự án theo lịch giả lập
+  2015–03/2026. Nếu lấy giờ máy sau 03/2026, các đợt seed sau sẽ bị bỏ qua.
+- Seed phải chạy từng đợt nguyên tử, mốc đợt sau lớn hơn mốc đã công bố; không chạy seed cùng ADF
+  từ Lookup đến khi cập nhật watermark. Backdate/thêm dòng cùng timestamp của đợt đã công bố không được phát hiện.
+- Silver vẫn dùng `AUTO CDC`, đổi `SEQUENCE BY updated_at`, `APPLY AS DELETE WHEN is_deleted = 1`.
+- Chỉ thấy trạng thái cuối giữa các lần Copy, không giữ mọi lần sửa. Ghi rõ vì sao không phải CDC log-based.
+
+Hợp đồng ADF, lệnh kiểm local/CI và checklist nghiệm thu Azure nằm ở
+[src/ingest/sql/README.md](../../src/ingest/sql/README.md).
 
 ## 4. Open Food Facts: crawler theo lô (task `off_crawler`)
 

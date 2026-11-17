@@ -233,6 +233,25 @@ CDC theo LSN cần bảng nguồn, CDC bật trên 2 bảng, watermark và nhậ
 - [ ] EXEC etl.usp_get_cdc_window trả mode = snapshot cho cả 2 capture instance
 - [ ] Script chạy lại lần hai không lỗi
 
+**Kết quả chuẩn bị AD-DE-04 (2026-11-17)**
+
+- Đã viết `src/ingest/sql/01_schema.sql`, `02_enable_cdc.sql` (retention 7 ngày),
+  `03_etl_control.sql` và nhánh thay thế `04_fallback_watermark.sql`; hướng dẫn ở README cùng thư mục.
+- CDC Lookup trả snapshot/window/empty; cửa sổ kế tiếp bắt đầu từ `increment(last_lsn)`.
+  Setter khóa mốc, kiểm đầu vào/cửa sổ, ghi log và mốc nguyên tử; retry không nhân log hoặc hạ mốc.
+- Dự phòng có `is_deleted`, mốc/log timestamp và procedure tương ứng; dùng `MAX(updated_at)` theo lịch giả lập,
+  yêu cầu seed nguyên tử, thời gian tăng theo đợt và không chạy seed đồng thời ADF.
+- Regression thực thi trên **SQL Server 2022 CU28 Developer local**: cả hai capture instance,
+  snapshot/window/empty, insert/update/delete, retention, retry, đầu vào sai, rollback và soft delete đều đạt.
+  Đã chạy lại trước/sau khi có dữ liệu và watermark, không mất dữ liệu/mốc/log.
+- `python3 scripts/check_retail_sql.py` dựng hai database trắng trong Docker tạm rồi tự dọn;
+  workflow `retail-sql-checks` chạy cùng regression khi PR sửa SQL/fixture/runner.
+- `uv sync --frozen`, `ruff check .`, `ruff format --check .` và toàn bộ **97 test Python** đều đạt
+  sau khi rebase lên main đã tích hợp AD-DE-02/03 (#137/#138); diff chỉ còn AD-DE-04.
+- **Chưa nghiệm thu Azure:** AD-OPS-12 (#14) và AD-OPS-06 (#8) còn mở, chưa có đích retail_db/admin Entra
+  cho phiên này. Ba tiêu chí nghiệm thu trên giữ chưa tick vì kết quả local không thay thế kết quả Azure.
+  Chưa triển khai seed/ADF (AD-DE-05/07), không tạo hay sửa tài nguyên cloud.
+
 ### AD-DE-05
 
 **Viết seed_retail_db theo đợt và job chạy seed**

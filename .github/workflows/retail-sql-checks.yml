@@ -1,0 +1,27 @@
+# SQL nguồn dùng T-SQL/CDC: kiểm hành vi bằng SQL Server Developer local, không dùng Azure.
+name: retail-sql-checks
+
+on:
+  pull_request:
+    paths:
+      - 'src/ingest/sql/**'
+      - 'tests/sql/**'
+      - 'scripts/check_retail_sql.py'
+      - '.github/workflows/retail-sql-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retail-sql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  retail-sql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kiểm CDC và fallback trên database tạm
+        run: python3 scripts/check_retail_sql.py
