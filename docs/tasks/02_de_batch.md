@@ -296,7 +296,7 @@ CDC cần insert, update, delete thật. Script sinh giá và khuyến mãi theo
   chạy lại không nhân dữ liệu, không cho bỏ wave hoặc đổi seed/danh mục/kế hoạch/chế độ.
   Hỗ trợ CDC và soft delete, mật khẩu đường chạy thật chỉ đọc từ scope `kv`.
 - `bundles/resources/jobs_ingest.yml`: job chạy tay `seed_retail_db`, tham số wave/đích/CSV,
-  cluster theo policy, một run, retry an toàn, pin `pymssql==2.4.6`.
+  cluster theo policy, một run, retry thủ công an toàn, pin `pymssql==2.4.6`.
 - **21 test seed**, toàn bộ **118 test Python**, Ruff và parse YAML đều đạt.
   Regression SQL Server 2022 CU28 local đạt cho cả 5 wave ở hai chế độ với 49.688 mã tự dựng:
   wave 0 có 49.688 giá/3.000 khuyến mãi; wave 1 có 2.484 giá UPDATE, 300 INSERT, 50 gia hạn, 30 hủy;
@@ -305,12 +305,13 @@ CDC cần insert, update, delete thật. Script sinh giá và khuyến mãi theo
   tự dựng, không phải đã seed danh mục thật lên Azure. Runner/CI bổ sung tùy chọn `--seed`, tự dọn Docker.
 - **Chưa nghiệm thu G1:** AD-DE-04 (#140) và AD-OPS-22 (#24) chưa hoàn tất;
   chưa deploy/chạy dev, chưa kiểm bundle bằng CLI/workspace hoặc đọc secret thật.
-  Spike #141 cho biết CDC free offer đã đạt; policy job vẫn cần P1 xử lý default `autotermination_minutes`
-  trước khi dùng `apply_policy_default_values: true`. Giữ ba tiêu chí nghiệm thu Azure ở trên chưa tick.
+  Spike #141 cho biết CDC free offer đã đạt; job đã theo G0 #146, không dùng `apply_policy_default_values`
+  và khai đủ trường fixed để tránh default auto-termination. Giữ ba tiêu chí nghiệm thu Azure ở trên chưa tick.
 
 **Bổ sung sau review:** kiểm fingerprint mọi wave trước khi áp dụng đợt mới; giữ lỗi gốc nếu rollback/close lỗi.
-Job không tự retry và chưa nghiệm thu xác thực: SQL login hiện tại không dùng được nếu #14 giữ Entra-only
-như spike #141. Cần P1 chốt SQL auth hoặc driver/token Entra; CSV mặc định còn chờ AD-DE-06.
+Job không tự retry; theo chốt G0 #146 dùng SQL auth + Entra admin và khai đủ fixed fields của policy,
+không lấy default auto-termination. Cần P1 triển khai #14/#24 đúng cấu hình trước nghiệm thu; CSV mặc định
+còn chờ AD-DE-06. Review bổ sung 4 test, toàn nhánh 122 test và regression SQL/seed hai chế độ đạt.
 
 ### AD-DE-06
 

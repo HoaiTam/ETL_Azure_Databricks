@@ -63,13 +63,13 @@ Không cung cấp mật khẩu qua CLI, file hoặc biến môi trường cho đ
 Dev nhận tiền tố của DAB; **tên job dev/prod không tự tách database SQL**.
 Chọn `server`/`database` đúng nguồn được cấp; dùng database thử riêng nếu cần thử lại từ đầu.
 
-Theo yêu cầu repo, job dùng classic single-node qua `${var.policy_id}` và
-`apply_policy_default_values: true`, có `custom_tags.owner = p2`; runtime/số node/loại máy do policy quyết định.
-Không mở pool, không tự chọn VM. Job tối đa một run, timeout 30 phút, không tự retry (`max_retries: 0`); lỗi cấu hình phải được sửa trước khi chạy tay lại.
-**Điều kiện policy trước khi chạy:** spike ghi trong `docs/devops/spike_results.md` xác nhận automated cluster
-không nhận `autotermination_minutes`. P1 phải cấp policy tương thích job, không tự áp default thuộc tính này;
-nếu policy vẫn có default đó, job với `apply_policy_default_values: true` sẽ bị từ chối.
-Không tự bỏ policy/đổi VM để chạy vòng qua. Job cluster được Databricks dừng khi job kết thúc.
+Theo chốt G0 #146 và `bundles/AGENTS.md`, job dùng classic single-node qua `${var.policy_id}`,
+khai đủ các trường fixed của policy: DBR 15.4 LTS, `${var.node_type_id}` (mặc định Standard_D4ds_v4),
+`num_workers: 0`, `SINGLE_USER`, Spark singleNode/local[*], tags owner p2/ResourceClass SingleNode.
+**Không đặt `apply_policy_default_values` hoặc `autotermination_minutes`** vì job cluster không nhận
+thuộc tính auto-termination của policy; Databricks dừng cluster khi job kết thúc. Policy vẫn kiểm các giá trị
+fixed nên đây không phải bỏ qua policy. Không mở pool hoặc chọn VM ngoài cấu hình được P1 chốt.
+Job tối đa một run, timeout 30 phút, không tự retry (`max_retries: 0`); sửa cấu hình trước khi chạy tay lại.
 Thư viện `pymssql==2.4.6` khớp lockfile; kết nối yêu cầu TLS, `datetime2` và không autocommit.
 
 Sau khi hạ tầng, CLI và profile đã được cấu hình, chạy trong `bundles/`:
@@ -81,11 +81,10 @@ databricks bundle run seed_retail_db -t dev --profile <profile> --params "wave=0
 ```
 
 `RETAIL_SQL_SERVER` do người vận hành đặt trong shell từ output hạ tầng, không đưa giá trị thật vào Git.
-**Chưa chốt xác thực ở #14:** code hiện dùng SQL login `sqladmin` và secret `sql-admin-password`.
-Spike #141 tạo server chỉ Entra (`--enable-ad-only-auth`), nên SQL login sẽ thất bại nếu cấu hình này
-được giữ ở 10-core. Chưa được nghiệm thu/chạy job trước khi P1 chốt: cấp SQL auth hoặc giữ Entra-only
-và thay driver sang `pyodbc`/`mssql-python` nhận token SP/MI (`pymssql` không nhận access token).
-PR hiện chỉ ghi rủi ro, chưa đổi cấu hình server hay tự chọn danh tính xác thực.
+**Xác thực theo chốt G0 #146:** server chính thức dùng SQL auth **cộng** Entra admin, không Entra-only
+như server spike ban đầu. Code dùng SQL login `sqladmin` và secret `sql-admin-password` đúng quyết định này;
+chưa cần đổi sang driver/token SP/MI. Trước nghiệm thu, P1 phải triển khai và kiểm SQL auth ở #14,
+secret scope/quyền ở #24; không chạy job nếu endpoint vẫn đang Entra-only (sẽ Login failed).
 
 Job mặc định để server rỗng để tránh kết nối nhầm; truyền thêm `user` nếu tài khoản khác `sqladmin`.
 Đường dẫn CSV mặc định là `/Volumes/<catalog>/landing_meta/raw/instacart/products/release=2017/products.csv`;
@@ -113,7 +112,7 @@ uv run --extra ingest python scripts/check_retail_sql.py --seed
   container/cổng được dọn trong `finally`. Không kết nối Azure hoặc database có sẵn.
 - Workflow `retail-sql-checks` cài extra ingest và chạy cùng lệnh. Pytest và regression SQL là hai nhóm riêng.
 - Local/CI không thay thế nghiệm thu job dev, secret scope và Azure SQL free offer.
-  Hiện chờ #40/#24/#42, P1 chốt xác thực và kiểm policy tương thích job;
+  Hiện chờ #40/#24/#42, P1 triển khai SQL auth + secret và kiểm policy đúng chốt G0;
   chưa deploy/chạy dev hoặc tạo chi phí cloud.
 
 Tham chiếu driver: [pymssql](https://pymssql.readthedocs.io/en/stable/ref/pymssql.html).

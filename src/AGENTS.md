@@ -70,7 +70,8 @@
   không xóa marker để ép retry; không seed cùng ADF. Nhánh soft delete không dùng DELETE vật lý.
 - Đường chạy thật chỉ đọc mật khẩu qua `dbutils.secrets.get("kv", "sql-admin-password")`.
   `--dry-run` không cần Spark, SQL hay secret; mặc định cần danh mục đủ 49.688 sản phẩm.
-- Job chạy tay `seed_retail_db` trong `jobs_ingest.yml`, dùng policy single-node; tên dev/prod không tách database.
+- Job chạy tay `seed_retail_db` trong `jobs_ingest.yml`, khai fixed fields theo policy single-node và G0 #146,
+  không lấy default auto-termination. SQL login theo chốt SQL auth + Entra admin; tên dev/prod không tách database.
 - Kiểm: `uv run pytest tests/test_seed_retail_db.py -q`; kiểm SQL thật bằng
   `uv run --extra ingest python scripts/check_retail_sql.py --seed` (Docker, cổng loopback tạm, tự dọn).
 

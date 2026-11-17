@@ -30,8 +30,6 @@
   Dev/prod chỉ tách tên job, không tách database nguồn; kiểm `server`/`database` trước khi chạy.
 - `products_csv` phải là danh mục thật đủ 49.688 sản phẩm; xem `src/ingest/README.md`.
   Chưa deploy/chạy dev khi AD-DE-04 hoặc AD-OPS-22 chưa nghiệm thu.
-- Spike #141 xác nhận job cluster không nhận `autotermination_minutes`. Giữ `apply_policy_default_values: true`
-  theo quy định repo, nhưng P1 phải cấp policy không áp default thuộc tính này cho job trước khi chạy dev.
-
-- Xác thực seed chưa chốt ở #14: SQL login hiện tại không chạy trên server Entra-only của spike.
-  Không nghiệm thu job trước khi P1 xác nhận SQL auth hoặc chọn driver/token Entra phù hợp.
+- Job seed khai đủ fixed fields như phần Compute, không dùng `apply_policy_default_values` hay auto-termination.
+- Xác thực theo G0 #146: SQL auth + Entra admin; #14 phải triển khai SQL login trước nghiệm thu.
+  Không dùng endpoint Entra-only của spike để chạy job mật khẩu.
