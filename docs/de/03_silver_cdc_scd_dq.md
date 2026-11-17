@@ -29,7 +29,7 @@
 |---|---|---|---|
 | **Streaming table** (`@dp.table` trả `readStream`, hoặc `create_streaming_table` + flow) | Chỉ dữ liệu **mới** kể từ lần trước (có checkpoint) | Dòng cũ không bị xử lý lại | Nguồn lớn và chỉ tăng; đích của `AUTO CDC` |
 | **Materialized view** (`@dp.materialized_view`) | Kết quả của câu truy vấn trên **toàn bộ** nguồn | Tính lại. Trên classic là tính lại toàn bộ; serverless có thể tính tăng dần | Join, window, tổng hợp, bảng nhỏ và vừa |
-| **View** tạm (`@dp.view`) | Không lưu, chỉ là bước trung gian trong pipeline | — | Nguồn của `AUTO CDC`, nơi đặt expectations |
+| **View** tạm (`@dp.temporary_view`) | Không lưu, chỉ là bước trung gian trong pipeline | — | Nguồn của `AUTO CDC`, nơi đặt expectations |
 
 ## 2. CDC → SCD Type 2: lịch sử giá
 
@@ -66,18 +66,13 @@ SCD2 trả lời được câu hỏi "**đơn đặt ngày 05/03 trả giá bao 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
+from common.dq import PRICE_RULES, PROMO_RULES
+
 CAT    = spark.conf.get("catalog")
 BRONZE = f"{CAT}.{spark.conf.get('bronze')}"
 SILVER = f"{CAT}.{spark.conf.get('silver')}"
 
-PRICE_RULES = {
-    "price_positive":  "unit_price > 0",
-    "currency_usd":    "currency = 'USD'",
-    "has_product_id":  "product_id IS NOT NULL",
-}
-
-
-@dp.view(comment="Thay đổi giá đã loại trùng; nguồn của AUTO CDC")
+@dp.temporary_view(comment="Thay đổi giá đã loại trùng; nguồn của AUTO CDC")
 @dp.expect_all_or_drop(PRICE_RULES)          # dòng vi phạm bị bỏ, số lượng ghi vào event log
 def product_prices_changes():
     return (spark.readStream.table(f"{BRONZE}.product_prices_cdc")
@@ -133,11 +128,8 @@ TRACK HISTORY ON unit_price, currency;
 ### 2.3 Promotions: SCD Type 1 có xóa
 
 ```python
-@dp.view
-@dp.expect_all_or_drop({
-    "discount_range": "discount_pct BETWEEN 0 AND 90",
-    "valid_window":   "end_date >= start_date",
-})
+@dp.temporary_view
+@dp.expect_all_or_drop(PROMO_RULES)
 def promotions_changes():
     return (spark.readStream.table(f"{BRONZE}.promotions_cdc")
             .select("promo_id", "product_id", "promo_type", "discount_pct", "start_date", "end_date",
@@ -230,12 +222,7 @@ Pipeline batch viết toàn bộ bằng Python. Chỗ nào SQL dễ đọc hơn 
 
 ```python
 # src/pipelines/batch/silver_instacart.py  (tiếp)
-ORDER_RULES = {
-    "valid_dow":   "order_dow BETWEEN 0 AND 6",
-    "valid_hour":  "order_hour_of_day BETWEEN 0 AND 23",
-    "valid_dsp":   "days_since_prior_order IS NULL OR days_since_prior_order BETWEEN 0 AND 30",
-    "no_rescued":  "_rescued_data IS NULL",
-}
+from common.dq import ITEM_RULES, ORDER_RULES
 
 
 @dp.materialized_view(name=f"{SILVER}.orders_batch",
@@ -253,15 +240,7 @@ def orders_batch():
              .drop("_source_file", "_file_mtime"))
 
 
-ITEM_RULES = {
-    "has_keys":        "order_id IS NOT NULL AND product_id IS NOT NULL",
-    "cart_order_pos":  "add_to_cart_order >= 1",
-    "reordered_flag":  "reordered IN (0, 1)",
-    "no_rescued":      "_rescued_data IS NULL",
-}
-
-
-@dp.view
+@dp.temporary_view
 @dp.expect_all_or_drop(ITEM_RULES)
 def order_items_prior_src():
     return spark.readStream.table(f"{BRONZE}.order_products_prior")
@@ -301,16 +280,15 @@ Các bản `expect_all*` nhận một dict nhiều luật cùng lúc.
 `expect_or_drop` chỉ **đếm** số dòng bị bỏ, không giữ lại nội dung. Để xem lại được dòng nào lỗi và vì sao, nhóm dùng **cùng bộ luật** cho một bảng quarantine với điều kiện **đảo ngược**:
 
 ```python
-def quarantine(name: str, source: str, rules: dict):
-    failed = F.filter(
-        F.array(*[F.when(~F.expr(c), F.lit(k)) for k, c in rules.items()]),
-        lambda x: x.isNotNull())
+from common.dq import dq_failed
 
+
+def quarantine(name: str, source: str, rules: dict):
     @dp.table(name=f"{SILVER}.quarantine_{name}",
               comment=f"Dòng vi phạm luật của {source}; giữ để điều tra, không xóa")
     def _q():
         return (spark.readStream.table(source)
-                .withColumn("_dq_failed", failed)
+                .withColumn("_dq_failed", dq_failed(rules))
                 .where(F.size("_dq_failed") > 0)
                 .withColumn("_quarantined_at", F.current_timestamp()))
 
@@ -319,7 +297,20 @@ quarantine("order_items_prior", f"{BRONZE}.order_products_prior", ITEM_RULES)
 quarantine("product_prices",    f"{BRONZE}.product_prices_cdc",   PRICE_RULES)
 ```
 
-`~F.expr(c)` của một luật có giá trị NULL cũng ra NULL, nên dòng đó không bị coi là lỗi. Các luật ở trên đều viết sao cho không trả NULL; luật mới cũng phải theo nguyên tắc này.
+Các bộ `ORDER_RULES`, `ITEM_RULES`, `PRICE_RULES`, `PROMO_RULES`, `EVENT_RULES` được định nghĩa
+duy nhất trong `src/common/dq.py`. Pipeline import cùng dict cho expectations và quarantine,
+giữ nguyên tên luật để đối soát số liệu; không sao chép định nghĩa vào từng notebook.
+
+Quy ước NULL: cột bắt buộc rỗng là **không đạt**, dùng `coalesce(điều_kiện, false)`;
+`days_since_prior_order IS NULL` vẫn hợp lệ cho đơn đầu và `_rescued_data IS NULL` là đạt.
+Mỗi luật đã được test cả đạt/lỗi, biên và NULL. Dict giữ đúng phạm vi luật ở các phần trên;
+kiểm khóa/đối soát liên bảng vẫn được làm ở task tương ứng.
+
+`dq_failed(rules)` trả biểu thức Spark `array<string>` tên mọi luật không đạt theo thứ tự khai báo.
+Dòng hợp lệ nhận `[]`; dict rỗng cũng có đúng kiểu `array<string>`. Hàm coi cả NULL từ luật
+tùy chỉnh là lỗi để không mất dòng quarantine; không che lỗi SQL hoặc cột nguồn bị thiếu.
+Hàm không phụ thuộc `dp`, không chạy action/ghi dữ liệu, dùng được trong batch và stream.
+Nguồn phải có đủ cột luật tham chiếu (kể cả `_rescued_data` khi dùng ORDER/ITEM_RULES).
 
 Số liệu đạt/bị loại theo từng luật được lấy từ **event log** của pipeline và ghi vào `ops.dq_results` ([06 §3](06_van_hanh_chay_lai.md)). Power BI trang vận hành đọc bảng này.
 

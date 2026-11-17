@@ -243,6 +243,8 @@ def kafka_to_bronze():
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F, types as T
 
+from common.dq import EVENT_RULES, dq_failed
+
 CAT    = spark.conf.get("catalog")
 BRONZE = f"{CAT}.{spark.conf.get('bronze')}"
 SILVER = f"{CAT}.{spark.conf.get('silver')}"
@@ -262,27 +264,26 @@ EVENT_V1 = T.StructType([
     T.StructField("items", T.ArrayType(ITEM)),
 ])
 
-EVENT_RULES = {
-    "parsed":       "event_id IS NOT NULL",
-    "known_type":   "event_type = 'order_placed'",
-    "schema_v1":    "schema_version = 1",
-    "has_items":    "size(items) > 0",
-    "id_matches":   "event_id = concat('order-', order_id)",
-}
-
-
-@dp.view(comment="Sự kiện đã parse; nguồn chung cho silver, gold stream và latency")
+@dp.temporary_view(comment="Sự kiện đã parse; nguồn chung cho silver, gold stream và latency")
 def events_parsed():
     return (spark.readStream.table(f"{BRONZE}.order_events")
             .withColumn("e", F.from_json("value_json", EVENT_V1))
-            .select("e.*", "_enqueued_ts", "_ingest_ts", "_kafka_partition", "_kafka_offset")
+            .select("e.*", "value_json", "_enqueued_ts", "_ingest_ts", "_kafka_partition", "_kafka_offset")
             .withColumn("_silver_ts", F.current_timestamp()))
 
 
-@dp.view
+@dp.temporary_view
 @dp.expect_all_or_drop(EVENT_RULES)
 def events_valid():
-    return spark.readStream.table("events_parsed")
+    return spark.readStream.table("events_parsed").drop("value_json")
+
+
+@dp.table(name=f"{SILVER}.quarantine_order_events", comment="Sự kiện lỗi và payload gốc để điều tra")
+def quarantine_order_events():
+    return (spark.readStream.table("events_parsed")
+            .withColumn("_dq_failed", dq_failed(EVENT_RULES))
+            .where(F.size("_dq_failed") > 0)
+            .withColumn("_quarantined_at", F.current_timestamp()))
 
 
 # --- header đơn: SCD1 theo order_id → phát lại không nhân dòng
@@ -298,7 +299,7 @@ dp.create_auto_cdc_flow(
 )
 
 
-@dp.view
+@dp.temporary_view
 def event_items():
     return (spark.readStream.table("events_valid")
             .select("order_id", "_enqueued_ts", "_kafka_partition", "_kafka_offset",
@@ -317,7 +318,11 @@ dp.create_auto_cdc_flow(
 )
 ```
 
-Bản ghi không parse được hoặc sai luật cũng có quarantine theo khuôn ở [03 §4.2](03_silver_cdc_scd_dq.md): `silver.quarantine_order_events` đọc `events_parsed` với luật đảo ngược. Bản ghi parse hỏng có `event_id IS NULL` nhưng `value_json` vẫn còn ở bronze để xem lại.
+Bản ghi không parse được hoặc sai luật được giữ trong `silver.quarantine_order_events`:
+payload `value_json` cùng tên các luật lỗi nằm ngay trong dòng quarantine.
+`EVENT_RULES` import từ `common.dq`, dùng chung cho `events_valid` và quarantine;
+NULL ở trường bắt buộc, sai loại/schema/id hoặc mảng món rỗng đều là lỗi.
+Quy ước chi tiết ở [03 §4.2](03_silver_cdc_scd_dq.md).
 
 ### 4.2 Vì sao phát lại không nhân dòng
 
