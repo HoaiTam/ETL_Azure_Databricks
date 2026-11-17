@@ -461,49 +461,61 @@ def dim_product():
 
 ## 7. Gộp batch ∪ stream và dựng `baskets`
 
-Batch và stream thuộc **hai pipeline**, mà mỗi bảng chỉ có một pipeline chủ, nên chúng gặp nhau qua **view của Unity Catalog**. Task SQL `create_views` của job tạo view một lần; view không cần refresh.
+Mỗi bảng chỉ có một pipeline chủ. Task [`src/tasks/create_views.sql`](../../src/tasks/create_views.sql)
+tạo **view Unity Catalog**, còn `baskets` là MV của pipeline batch; pipeline batch chỉ đọc các bảng
+silver stream như nguồn bên ngoài, không khai báo lại target stream.
 
-```sql
--- src/tasks/create_views.sql
-CREATE OR REPLACE VIEW instacart.silver.orders AS
-SELECT order_id, user_id, eval_set, order_number, order_dow, order_hour_of_day,
-       days_since_prior_order, order_ts_sim, source
-FROM instacart.silver.orders_batch
-UNION ALL
-SELECT order_id, user_id, 'train', order_number, order_dow, order_hour_of_day,
-       days_since_prior_order, event_time, 'stream'
-FROM instacart.silver.stream_orders;
+### 7.1 Hai view có tham số schema
 
-CREATE OR REPLACE VIEW instacart.silver.order_items AS
-SELECT order_id, product_id, add_to_cart_order, reordered, 'batch' AS source
-FROM instacart.silver.order_items_prior
-UNION ALL
-SELECT order_id, product_id, add_to_cart_order, reordered, 'stream'
-FROM instacart.silver.stream_order_items;
-```
+File SQL nhận hai tham số STRING bắt buộc `catalog` và `silver_schema` (từng tên riêng, không bọc backtick).
+Câu đầu `USE IDENTIFIER(...)` chọn namespace đã quote cả catalog/schema; hai câu tiếp theo
+`CREATE OR REPLACE VIEW orders` và `order_items` dùng namespace này. Chạy **cả file cùng một phiên**,
+dừng nếu USE lỗi. Không chọn riêng hai câu CREATE dựa vào schema hiện tại của SQL editor.
+Cách này tránh đặt parameter marker trong thân CREATE VIEW, vốn không được Spark 3.5 chấp nhận.
 
-`baskets` là materialized view trong pipeline batch. Nó đọc bảng của pipeline stream như một nguồn bên ngoài (được phép, vì chỉ **đọc**):
+| View | Nhánh batch | Nhánh stream |
+|---|---|---|
+| `orders` | Header prior/test từ orders_batch, giữ source và is_test | stream_orders: eval_set=train, event_time đổi tên order_ts_sim, source=stream, is_test=false |
+| `order_items` | order_items_prior, source=batch | stream_order_items, source=stream |
 
-```python
-# src/pipelines/batch/silver_instacart.py  (cuối file)
-@dp.materialized_view(name=f"{SILVER}.baskets", cluster_by=["split"],
-                      comment="Giỏ hàng cho DS: prior để train, holdout (đơn train qua stream) để đánh giá")
-@dp.expect_or_fail("non_empty_basket", "n_items >= 1")
-def baskets():
-    return spark.sql(f"""
-      SELECT order_id, user_id, split, array_sort(collect_set(product_id)) AS items, count(*) AS n_items
-      FROM (
-        SELECT i.order_id, o.user_id, i.product_id, 'prior' AS split
-        FROM {SILVER}.order_items_prior i JOIN {SILVER}.orders_batch o USING (order_id)
-        WHERE o.eval_set = 'prior'
-        UNION ALL
-        SELECT i.order_id, s.user_id, i.product_id, 'holdout'
-        FROM {SILVER}.stream_order_items i JOIN {SILVER}.stream_orders s USING (order_id)
-      )
-      GROUP BY order_id, user_id, split""")
-```
+Cả hai dùng **UNION ALL**, chọn cột tường minh; không đọc `bronze.order_products_train` để nạp lại train
+bằng batch, không che trùng khóa bằng UNION/DISTINCT. Nguồn phải upsert/duy nhất và hai nhóm mã đơn
+phải rời nhau. View phản ánh thay đổi bảng nguồn, không cần refresh hay chạy lại DDL khi có stream mới.
+`orders` giữ header test và cờ is_test; test không tạo giỏ DS.
 
-Đơn test không có món hàng nên tự nhiên không xuất hiện trong `baskets`.
+### 7.2 Materialized view baskets
+
+MV ở cuối [`silver_instacart.py`](../../src/pipelines/batch/silver_instacart.py), helper
+[`common/baskets.py`](../../src/common/baskets.py) đọc batch bốn bảng silver trực tiếp:
+
+- orders_batch lọc eval_set=prior + order_items_prior → split `prior` để học luật.
+- stream_orders + stream_order_items → split `holdout` để đánh giá.
+- Không đọc hai view UC để tránh vòng phụ thuộc bootstrap. Target stream phải tồn tại đúng schema
+  trước update batch phiên bản này; thiếu target thì báo lỗi, không tạo bảng giả hay thay quyền sở hữu.
+- Giữ mọi header đủ điều kiện bằng LEFT JOIN món. Header chưa có món có `items=[]`, n_items=0 và
+  làm check `non_empty_prior_basket` fail ở prior. Ở holdout, header chờ món chỉ cảnh báo trong
+  `basket_candidates` và được đưa vào basket ở update sau khi items đã commit.
+- `items = array_sort(collect_set(product_id))`, kiểu ARRAY<BIGINT>; `n_items = size(items)`.
+  Món trùng do replay không làm tăng n_items; danh sách là tập sản phẩm, không phải số lượng mua.
+  Bản sao header cùng order_id/user_id được gộp, header cùng mã nhưng khác user bị fail.
+- Giữ cờ kiểm tra kỹ thuật để fail khi có sản phẩm NULL/không dương, khóa header sai,
+  order_id xuất hiện ở nhiều giỏ hoặc mã đơn stream giao với **bất kỳ** header batch nào (kể cả test).
+  Nguồn vẫn còn nguyên trong silver để điều tra, không sửa/xóa nguồn từ MV.
+
+Expectations fail: `non_empty_prior_basket`, `valid_basket_keys`, `valid_basket_items`,
+`disjoint_sources`, `unique_basket_order`. Các cột kỹ thuật `_items_valid`, `_source_disjoint`,
+`dup_cnt` ở lại bảng cho expectations; DS chỉ lấy năm cột nghiệp vụ.
+Món không có header không thể thành basket; đối soát orphan/count ở AD-DE-17 vẫn bắt buộc.
+
+Sau khi stream phát đủ, mục tiêu **3.214.874 prior / 131.209 holdout**, cần đối chiếu số thật.
+Giỏ rỗng trong lúc stream mới cập nhật một target chưa phải mất dữ liệu: chờ cả hai target hoàn tất
+rồi chạy lại batch. Một update thất bại có thể để lại MV phiên bản thành công cũ; kiểm update ID.
+
+Hướng dẫn bootstrap, chạy SQL hai lần trên warehouse, đối soát và replay:
+[03f_nghiem_thu_baskets.md](03f_nghiem_thu_baskets.md). **Chưa nghiệm thu trên workspace**;
+AD-DE-12 (#48) và AD-ST-05 (#68) còn là gate hoàn tất.
+Tham khảo [IDENTIFIER](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-names-identifier-clause)
+và [USE](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-syntax-ddl-use-schema).
 
 ## 8. Lỗi giữa chừng thì chạy lại thế nào
 

@@ -92,5 +92,8 @@ Quyền đọc event log cho vai khác vẫn theo AD-OPS-20; không tự mở r�
 Xem kết quả validate, deploy, smoke update và đọc event log trên [issue AD-DE-08](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/44).
 Smoke update kiểm đường chạy của pipeline và event log. Đối soát dữ liệu ETL thực hiện ở các task bronze, silver và gold.
 
+AD-DE-15 thêm `baskets` và views UC hợp nhất. Mặc định `enable_baskets=false`; chỉ bật
+khi hai bảng stream tồn tại đúng schema. Xem [nghiệm thu baskets](../docs/de/03f_nghiem_thu_baskets.md).
+
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).

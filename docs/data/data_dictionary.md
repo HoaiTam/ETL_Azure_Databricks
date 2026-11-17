@@ -397,6 +397,28 @@ Tỉ lệ khớp thực tế **chưa đo**, cần làm trong giai đoạn spike.
 | `silver.baskets`           | `order_items` gom theo đơn                                        | Đầu vào phần DS: `split = prior` để train, `holdout` để đánh giá |
 | `silver.quarantine_*`      | Bản ghi vi phạm luật chất lượng dữ liệu (mỗi nguồn một bảng) | Lưu lỗi kèm lý do (`_dq_failed`), không xóa im lặng                  |
 
+### 6.2 View hợp nhất và `silver.baskets` (AD-DE-15)
+
+`silver.orders` có order_id, user_id, eval_set, order_number, order_dow, order_hour_of_day,
+days_since_prior_order, order_ts_sim, source và is_test. Batch giữ prior/test; stream đổi event_time
+thành order_ts_sim và gắn train/stream/is_test=false. `silver.order_items` có order_id, product_id,
+add_to_cart_order, reordered, source. Cả hai UNION ALL, không tự khử trùng hay tạo bản train batch.
+
+Baskets có năm cột nghiệp vụ: `order_id`, `user_id`, `split`, `items ARRAY<BIGINT>` tăng dần/duy nhất,
+`n_items INT = size(items)`. Khóa là order_id, chỉ có prior/holdout; header test không tạo basket.
+Không dùng n_items như số lượng mua: đây là số sản phẩm khác nhau trong giỏ.
+Các cột `_items_valid`, `_source_disjoint`, `dup_cnt` chỉ để kiểm chất lượng, không phải feature DS.
+Snapshot DS ở AD-DE-20 cần kiểm miền số và cast tường minh sang schema ARRAY<INT>/khóa INT đã chốt.
+
+Mục tiêu full release: prior **3.214.874**, holdout **131.209** sau khi phát đủ stream.
+**Trạng thái 2026-11-17: chưa đo trên workspace**. AD-DE-12 (#48), AD-ST-05 (#68) chưa nghiệm thu;
+fixture không thay được số thật. Hướng dẫn đối soát SQL/view/baskets và replay:
+[03f_nghiem_thu_baskets.md](../de/03f_nghiem_thu_baskets.md).
+
+`silver.baskets` lưu `order_id INT`, `user_id INT`, `items ARRAY<INT>`. Guard `_items_valid`
+xác nhận tất cả product_id hợp lệ, `_source_disjoint` xác nhận order_id holdout không có ở batch,
+và `dup_cnt` đếm giỏ có thể công bố theo order_id. Header holdout đang chờ món được cảnh báo riêng.
+
 ## 7. Dữ liệu cho Data Science
 
 Chi tiết cách dựng ở [de/08](../de/08_du_lieu_cho_ds.md); cách dùng ở [ds/01](../ds/01_du_lieu_thuc_nghiem.md).
