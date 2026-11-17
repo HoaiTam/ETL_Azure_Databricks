@@ -77,6 +77,7 @@ def test_source_catalog_mapping_and_copy_settings_match_data_contract():
                     "type": "Expression",
                 }
                 assert a["typeProperties"]["sink"]["formatSettings"]["quoteAllText"] is True
+                assert a["policy"]["retry"] == 3 and a["policy"]["retryIntervalInSeconds"] == 300
                 assert a["typeProperties"]["enableSkipIncompatibleRow"] is False
                 assert "validateDataConsistency" not in a["typeProperties"]  # HTTP không hỗ trợ.
             else:

@@ -71,7 +71,8 @@ Pipeline con:
 Hai If kiểm template/số dòng nằm ở cấp cao nhất của pipeline con; không lồng If trong If.
 Pipeline cha dùng ForEach → If → Execute Pipeline để tuân giới hạn nesting của ADF.
 
-Copy/Metadata/Delete có retry 5 lần, nghỉ 60 giây, timeout activity 2 giờ (Zenodo có thể trả 503).
+Theo chốt G0 #146, HTTP Copy từ Zenodo retry 3 lần, nghỉ 300 giây để chờ bảo trì/503.
+Các Copy nội bộ ADLS/Metadata/Delete khác retry 5 lần, nghỉ 60 giây; timeout activity 2 giờ.
 Riêng `get_marker_template` đặt retry 0: thiếu template là lỗi cấu hình cần sửa, không đợi 5 phút rồi thất bại.
 Binary Copy dùng `PreserveHierarchy` + `validateDataConsistency: true`, không bỏ qua file lỗi.
 HTTP không hỗ trợ data consistency verification nên dùng mapping + đếm dòng, không bật flag đó trên HTTP.

@@ -18,7 +18,7 @@ def ref(name, parameters):
     return {"referenceName": name, "type": "DatasetReference", "parameters": parameters}
 
 
-def activity(name, kind, properties, *, after=None, description=None, retry=5, **extra):
+def activity(name, kind, properties, *, after=None, description=None, retry=5, retry_interval=60, **extra):
     result = {
         "name": name,
         "type": kind,
@@ -30,7 +30,7 @@ def activity(name, kind, properties, *, after=None, description=None, retry=5, *
         result["policy"] = {
             "timeout": "0.02:00:00",
             "retry": retry,
-            "retryIntervalInSeconds": 60,
+            "retryIntervalInSeconds": retry_interval,
             "secureOutput": False,
             "secureInput": False,
         }
@@ -207,6 +207,8 @@ def render(root=ROOT):
                 "enableSkipIncompatibleRow": False,
             },
             after="if_empty_template",
+            retry=3,
+            retry_interval=300,
             inputs=[ref("ds_instacart_http_csv", {"file_name": filename})],
             outputs=[adls(stage_folder, filename, "ds_instacart_adls_csv")],
         ),

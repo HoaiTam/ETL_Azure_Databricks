@@ -70,8 +70,10 @@ ADF đọc bằng `json()`. Cùng cách đó cho `tables_json` và `translators_
   giữ các cột dạng String, quote/escape theo CSV chuẩn và UTF-8 không BOM. Nguồn HTTP tự nhận LF/CRLF,
   không ép rowDelimiter; output ADLS dùng LF.
 - Binary publish/marker bật consistency verification với PreserveHierarchy; không bật kiểm này cho HTTP
-  vì connector không hỗ trợ. Copy/Metadata/Delete retry 5 lần khi lỗi tạm thời, nghỉ 60 giây;
+  vì connector không hỗ trợ. HTTP Copy retry 3 lần/300 giây theo chốt G0 #146;
+  Copy ADLS/Metadata/Delete khác retry 5 lần/60 giây;
   riêng kiểm template marker retry 0 vì thiếu template là lỗi cấu hình.
+- **Chưa kiểm thời gian thực tế:** prior khoảng 578 MB; timeout Copy là 2 giờ, ghi throughput/thời gian khi debug.
 - **Chưa nghiệm thu Azure:** AD-OPS-25 còn mở; JSON đã kiểm local/SDK, chưa export/debug từ Studio
   hay có sáu thư mục landing thật. Checklist chạy lần đầu/lần hai nằm ở `adf/README.md`.
 
