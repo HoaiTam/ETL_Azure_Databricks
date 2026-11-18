@@ -15,7 +15,9 @@ SQL_DIR = Path(__file__).resolve().parent
 PREPARE_FILES = ("01_snapshot.sql", "02_index_transactions.sql", "03_holdout.sql")
 VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 REPLACE_VERSION = re.compile(
-    r"\A(INSERT INTO IDENTIFIER\(:(?:item_index|transactions)\) REPLACE WHERE data_version = ):v\b"
+    r"\A(INSERT\s+INTO\s+IDENTIFIER\(\s*:(?:item_index|transactions)\s*\)\s+"
+    r"REPLACE\s+WHERE\s+data_version\s*=\s*):v\b",
+    re.IGNORECASE,
 )
 
 
@@ -136,8 +138,12 @@ def run_files(spark: SparkSession, args: dict[str, str], files: Sequence[str] = 
         for index, statement in enumerate(statements, start=1):
             # Delta OSS 3.3 tách predicate REPLACE WHERE trước khi Spark bind marker.
             # Chỉ render literal đã kiểm ở hai predicate cố định, giữ bind cho phần SELECT.
-            statement = REPLACE_VERSION.sub(lambda m: f"{m[1]}'{version}'", statement)
             try:
+                statement, substitutions = REPLACE_VERSION.subn(lambda m: f"{m[1]}'{version}'", statement)
+                if not substitutions and re.search(r"\bREPLACE\s+WHERE\b", statement, flags=re.IGNORECASE):
+                    raise ValueError(
+                        "REPLACE WHERE cần dạng INSERT INTO IDENTIFIER(:bảng) REPLACE WHERE data_version = :v"
+                    )
                 spark.sql(statement, args=args).collect()
             except Exception as exc:
                 raise RuntimeError(f"{name}, câu {index}, phiên bản {version}: {exc}") from exc

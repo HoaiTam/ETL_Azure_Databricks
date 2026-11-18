@@ -10,6 +10,8 @@
 |---|---|---|
 | `ds_data.data_versions` | Mỗi phiên bản dữ liệu một dòng: thời điểm tạo, số giỏ `prior` / `holdout` | Đối soát |
 | `ds_data.baskets` | **Bản cố định** của `silver.baskets` theo `data_version` | Nguồn của mọi bảng dưới |
+| `ds_data.ds_prepare_products` | Danh mục cố định theo phiên bản | Nội bộ DE, DS không dùng |
+| `ds_data.ds_prepare_holdout` | Thứ tự món stream cố định theo phiên bản | Nội bộ DE, DS không dùng |
 | `ds_data.item_index` | Mã hóa item thành `idx` (0 = phổ biến nhất) cho 3 cấp `product` / `aisle` / `department` | DS, view `gold.*` |
 | `ds_data.transactions` | Giỏ hàng theo 3 cấp, `items array<int>` tăng dần, `scale_bucket` 0–99 | DApriori, DATID, FP-Growth |
 | `ds_data.holdout_eval` | Đơn holdout chia thành `context` / `targets`, chia `val` / `test` | Đánh giá gợi ý (E7) |
@@ -48,15 +50,27 @@ catalog, schema và nguồn được giữ ổn định từ lần đầu. Delta
 silver đứng yên đến khi snapshot hoàn tất và chỉ chạy một writer vào schema DS. Các phần đã ghi được
 sử dụng lại. Nếu cần thay dữ liệu đầu vào đã cố định, dùng một phiên bản mới và lưu lại nguyên nhân.
 
+**Quy tắc phiên bản**
+
+- Tạo `v1` sau G3 và giữ dữ liệu đó cố định. Các lần chạy lại cùng phiên bản chỉ tái tạo dữ liệu dẫn xuất từ snapshot đã chốt.
+- Khi cần dữ liệu khác, tạo `v2` và ghi lý do để DS chạy lại thí nghiệm. Giữ `v1` để so sánh.
+- Nếu thực sự phải tạo lại `v1`, thông báo DS để loại bỏ kết quả cũ, tạm dừng mọi writer và
+  xóa riêng phiên bản đó (`DELETE … WHERE data_version = 'v1'`) ở đủ bảy bảng
+  `data_versions`, `baskets`, `ds_prepare_products`, `ds_prepare_holdout`, `item_index`,
+  `transactions` và `holdout_eval`. Chỉ chạy lại sau khi đối soát cả bảy bảng đã sạch `v1`.
+  Nếu đã có file xuất, thu hồi manifest cũ trước khi công bố lại.
+
 ## 3. Mã hóa item và giao dịch theo 3 cấp
 
 [`02_index_transactions.sql`](../../src/tasks/ds_prepare/02_index_transactions.sql) dùng dữ liệu snapshot:
 
 - `item_index` có ba cấp `product`, `aisle`, `department`. `freq_prior` đếm **số giỏ prior chứa item**.
   `idx` đánh liên tục từ 0 theo tần suất giảm dần và khóa số tăng dần khi hòa. DS lọc top-N bằng `idx < N`.
+  Thứ tự support này giúp DATID bỏ qua bước sắp xếp ([ds/02 §3](../ds/02_thuat_toan_spark.md)).
 - `transactions.items` là tập `idx` tăng dần. Một đơn mua nhiều sản phẩm cùng aisle hoặc department
   vẫn có một `idx` của nhóm đó. Holdout chỉ giữ item đã có trong prior theo từng cấp. Nếu một giỏ không
-  còn item ở một cấp, giỏ đó không tạo giao dịch ở cấp đó.
+  còn item ở một cấp, giỏ đó không tạo giao dịch ở cấp đó. Ghi số món holdout bị bỏ do
+  không có trong prior trong checklist §7.
 - `scale_bucket = pmod(xxhash64(order_id), 100)`, với `order_id` kiểu INT. Các ngưỡng 10, 25, 50, 100
   tạo tập con lồng nhau và tất định ([ds/01 §1](../ds/01_du_lieu_thuc_nghiem.md)).
 - `REPLACE WHERE data_version = :v` tính lại riêng index và transactions của phiên bản đó. Danh mục
@@ -163,6 +177,9 @@ resources:
   render phiên bản đã kiểm định dạng ở hai predicate ghi đè. Tên bảng đi qua `IDENTIFIER` đã quote từng phần.
   Dùng `--catalog`, `--silver-schema` và `--ds-schema` để cô lập dev/local. Có thể truyền danh sách tên file
   trong thư mục `ds_prepare` để repair một bước, hoặc chạy `04_check.sql` sau khi AD-DE-21 bổ sung file đó.
+  AD-DE-21 truyền cùng ba tham số namespace cho `04_check.sql` và `export_txt.py`. Dùng tên
+  bảng đã quote từ `sql_args` qua `IDENTIFIER(:…)` khi truy vấn SQL, cùng schema DS cho volume xuất.
+  Thay namespace minh họa ở §5 và §7 bằng tham số đã resolve trước khi chạy dev.
 - AD-DE-20 kiểm ba file trên Spark 3.5 và Delta 3.3 local với fixture. AD-DE-21 phụ trách bundle, file txt,
   check G3 và nghiệm thu `v1` trên workspace với dữ liệu đầy đủ.
 - **Không đặt lịch.** P2 chạy tay một lần sau G3 (`databricks bundle run ds_prepare`), và chạy lại khi tạo phiên bản mới.

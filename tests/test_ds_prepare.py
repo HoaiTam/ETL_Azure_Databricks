@@ -1,9 +1,11 @@
 """Chạy ba file ds-prepare bằng Spark + Delta local, với schema riêng cho mỗi fixture."""
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
+from tasks.ds_prepare import run_sql
 from tasks.ds_prepare.run_sql import PREPARE_FILES, run_files, split_sql, sql_args
 
 
@@ -35,6 +37,27 @@ def test_sql_parameters_do_not_mix_input_and_output_namespaces():
         sql_args("v1'; delete")
     with pytest.raises(ValueError, match="tách khỏi"):
         sql_args("v1", silver_schema="Silver", ds_schema="silver")
+
+
+def test_replace_where_checks_predicate_before_execution(monkeypatch, tmp_path):
+    monkeypatch.setattr(run_sql, "SQL_DIR", tmp_path)
+    script = tmp_path / "replace.sql"
+    args = sql_args("v1")
+    executed = []
+
+    def sql(statement, *, args):
+        executed.append(statement)
+        return SimpleNamespace(collect=list)
+
+    spark = SimpleNamespace(sql=sql)
+    script.write_text("INSERT INTO IDENTIFIER(:other) REPLACE WHERE data_version = :v SELECT :v;")
+    with pytest.raises(RuntimeError, match=r"replace.sql, câu 1.*REPLACE WHERE"):
+        run_files(spark, args, (script.name,))
+    assert not executed
+
+    script.write_text("insert into identifier(:item_index)\nreplace where data_version=:v SELECT :v;")
+    run_files(spark, args, (script.name,))
+    assert executed == ["insert into identifier(:item_index)\nreplace where data_version='v1' SELECT :v"]
 
 
 @pytest.fixture
