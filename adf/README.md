@@ -2,8 +2,9 @@
 
 [DE/01 §1–2](../docs/de/01_ingest_landing.md) là thiết kế; các JSON ở đây chuẩn bị cho
 AD-OPS-25 (#27) và AD-OPS-26 (#28) triển khai qua Terraform `40-orchestration`.
-**Chưa debug/export từ ADF Studio hoặc chạy trên factory thật** vì linked service/dataset G1 chưa được cấp.
-JSON được dựng theo API và đã kiểm model SDK; không publish trực tiếp từ agent hay Studio.
+**Chưa debug/export từ ADF Studio hoặc chạy trên factory thật.** Kiểm tra ngày 2026-11-18
+xác nhận Data Factory đã tồn tại, còn danh sách linked service, dataset và pipeline đều rỗng.
+JSON được dựng theo API và đã kiểm model SDK. Terraform phụ trách publish.
 
 ## File và ranh giới với P1
 
@@ -138,12 +139,19 @@ python3 scripts/build_instacart_adf.py --definition pl_ingest_instacart_table
 python3 scripts/build_instacart_adf.py --definition pl_ingest_instacart
 ```
 
-Sau #27, P1 dựng dataset/linked service và template, rồi #28 đưa cả hai pipeline/settings vào Terraform.
-Có thể debug trước với `tables_json = ["departments"]` (giá trị String JSON, expected_rows vẫn là 21),
-kiểm đủ rowsRead/rowsCopied, quoting và marker 0 byte. Không publish từ Studio.
-Sau khi P1 publish qua workflow, chạy pipeline cha mặc định đủ sáu bảng, chụp output/count/path,
-chạy lần hai và xác nhận sáu lượt bỏ qua không Copy/Delete, staging không còn file.
-Theo dõi thời gian/throughput/retry của prior 578 MB. Chỉ sau đó đánh dấu nghiệm thu G1.
+P1 bàn giao theo thứ tự sau:
+
+1. **#27** tạo `ls_zenodo`, `ls_adls` và ba dataset đúng hợp đồng ở trên. Chuẩn bị template
+   `landing/ops/_SUCCESS` 0 byte và xác nhận quyền đọc, ghi, xóa của managed identity ADF.
+2. Nếu có storage dev riêng, chạy debug `tables_json = ["departments"]` (giá trị String JSON) ở đó.
+   Kiểm `rowsRead = rowsCopied = 21`, nội dung CSV và marker 0 byte. Dùng linked service dev
+   trỏ tới storage riêng vì đường dẫn release cố định trong code. Nếu chỉ có storage chính thức,
+   dùng lượt chạy đủ sáu bảng sau publish để nghiệm thu.
+3. **#28** nạp settings và activities của cả hai pipeline qua `40-orchestration` theo thứ tự con trước cha.
+   Sau khi workflow publish, chạy pipeline cha với tham số mặc định. Ghi run ID, số `rowsRead` và
+   `rowsCopied` theo bảng, đủ sáu CSV và sáu marker; ghi thời gian/throughput/retry của prior 578 MB.
+4. Chạy lại pipeline cha. Ghi run ID thứ hai và xác nhận cả sáu lượt bỏ qua nhánh Copy/Delete,
+   file đã công bố giữ nguyên và `landing/_staging/instacart` không còn file. Lưu bằng chứng vào #42.
 
 Tham chiếu chính thức:
 [parameterize mapping](https://learn.microsoft.com/en-us/azure/data-factory/copy-activity-schema-and-type-mapping#parameterize-mapping),
