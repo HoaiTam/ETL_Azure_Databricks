@@ -1,0 +1,32 @@
+{
+  "name": "ds_instacart_http_csv",
+  "properties": {
+    "linkedServiceName": {
+      "referenceName": "ls_zenodo",
+      "type": "LinkedServiceReference"
+    },
+    "parameters": {
+      "file_name": {
+        "type": "String",
+        "defaultValue": ""
+      }
+    },
+    "type": "DelimitedText",
+    "typeProperties": {
+      "location": {
+        "type": "HttpServerLocation",
+        "relativeUrl": {
+          "value": "@concat('api/records/2654444/files/', dataset().file_name, '/content')",
+          "type": "Expression"
+        }
+      },
+      "columnDelimiter": ",",
+      "quoteChar": "\"",
+      "escapeChar": "\"",
+      "firstRowAsHeader": true,
+      "nullValue": "",
+      "encodingName": "UTF-8 without BOM"
+    },
+    "schema": []
+  }
+}

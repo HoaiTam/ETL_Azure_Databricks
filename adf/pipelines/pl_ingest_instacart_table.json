@@ -1,0 +1,414 @@
+[
+  {
+    "name": "get_marker_template",
+    "type": "GetMetadata",
+    "dependsOn": [],
+    "policy": {
+      "timeout": "0.02:00:00",
+      "retry": 0,
+      "retryIntervalInSeconds": 60,
+      "secureOutput": false,
+      "secureInput": false
+    },
+    "typeProperties": {
+      "dataset": {
+        "referenceName": "ds_instacart_adls_binary",
+        "type": "DatasetReference",
+        "parameters": {
+          "file_system": "landing",
+          "folder_path": "ops",
+          "file_name": "_SUCCESS"
+        }
+      },
+      "fieldList": [
+        "size"
+      ],
+      "storeSettings": {
+        "type": "AzureBlobFSReadSettings",
+        "recursive": false
+      }
+    }
+  },
+  {
+    "name": "if_empty_template",
+    "type": "IfCondition",
+    "dependsOn": [
+      {
+        "activity": "get_marker_template",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ],
+    "typeProperties": {
+      "expression": {
+        "value": "@equals(activity('get_marker_template').output.size, 0)",
+        "type": "Expression"
+      },
+      "ifTrueActivities": [],
+      "ifFalseActivities": [
+        {
+          "name": "fail_marker_template",
+          "type": "Fail",
+          "dependsOn": [],
+          "typeProperties": {
+            "message": "Template landing/ops/_SUCCESS phải là file 0 byte.",
+            "errorCode": "INSTACART_MARKER_TEMPLATE"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "copy_csv_to_staging",
+    "type": "Copy",
+    "dependsOn": [
+      {
+        "activity": "if_empty_template",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ],
+    "policy": {
+      "timeout": "0.02:00:00",
+      "retry": 3,
+      "retryIntervalInSeconds": 300,
+      "secureOutput": false,
+      "secureInput": false
+    },
+    "inputs": [
+      {
+        "referenceName": "ds_instacart_http_csv",
+        "type": "DatasetReference",
+        "parameters": {
+          "file_name": {
+            "value": "@concat(pipeline().parameters.table_name, '.csv')",
+            "type": "Expression"
+          }
+        }
+      }
+    ],
+    "outputs": [
+      {
+        "referenceName": "ds_instacart_adls_csv",
+        "type": "DatasetReference",
+        "parameters": {
+          "file_system": "landing",
+          "folder_path": {
+            "value": "@concat('_staging/instacart/', pipeline().parameters.table_name, '/release=2017')",
+            "type": "Expression"
+          },
+          "file_name": {
+            "value": "@concat(pipeline().parameters.table_name, '.csv')",
+            "type": "Expression"
+          }
+        }
+      }
+    ],
+    "typeProperties": {
+      "source": {
+        "type": "DelimitedTextSource",
+        "storeSettings": {
+          "type": "HttpReadSettings",
+          "requestMethod": "GET",
+          "httpRequestTimeout": "00:05:00"
+        },
+        "formatSettings": {
+          "type": "DelimitedTextReadSettings"
+        }
+      },
+      "sink": {
+        "type": "DelimitedTextSink",
+        "storeSettings": {
+          "type": "AzureBlobFSWriteSettings"
+        },
+        "formatSettings": {
+          "type": "DelimitedTextWriteSettings",
+          "quoteAllText": true
+        }
+      },
+      "translator": {
+        "value": "@json(pipeline().parameters.translator_json)",
+        "type": "Expression"
+      },
+      "enableStaging": false,
+      "enableSkipIncompatibleRow": false
+    }
+  },
+  {
+    "name": "if_rows_match",
+    "type": "IfCondition",
+    "dependsOn": [
+      {
+        "activity": "copy_csv_to_staging",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ],
+    "description": "Thiếu rowsCopied/rowsRead làm biểu thức lỗi: không được coi như đã đối soát đạt.",
+    "typeProperties": {
+      "expression": {
+        "value": "@and(equals(activity('copy_csv_to_staging').output.rowsCopied, int(pipeline().parameters.expected_rows)), equals(activity('copy_csv_to_staging').output.rowsRead, int(pipeline().parameters.expected_rows)))",
+        "type": "Expression"
+      },
+      "ifTrueActivities": [
+        {
+          "name": "publish_csv",
+          "type": "Copy",
+          "dependsOn": [],
+          "policy": {
+            "timeout": "0.02:00:00",
+            "retry": 5,
+            "retryIntervalInSeconds": 60,
+            "secureOutput": false,
+            "secureInput": false
+          },
+          "inputs": [
+            {
+              "referenceName": "ds_instacart_adls_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "file_system": "landing",
+                "folder_path": {
+                  "value": "@concat('_staging/instacart/', pipeline().parameters.table_name, '/release=2017')",
+                  "type": "Expression"
+                },
+                "file_name": {
+                  "value": "@concat(pipeline().parameters.table_name, '.csv')",
+                  "type": "Expression"
+                }
+              }
+            }
+          ],
+          "outputs": [
+            {
+              "referenceName": "ds_instacart_adls_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "file_system": "landing",
+                "folder_path": {
+                  "value": "@concat('instacart/', pipeline().parameters.table_name, '/release=2017')",
+                  "type": "Expression"
+                },
+                "file_name": {
+                  "value": "@concat(pipeline().parameters.table_name, '.csv')",
+                  "type": "Expression"
+                }
+              }
+            }
+          ],
+          "typeProperties": {
+            "source": {
+              "type": "BinarySource",
+              "storeSettings": {
+                "type": "AzureBlobFSReadSettings",
+                "recursive": false
+              }
+            },
+            "sink": {
+              "type": "BinarySink",
+              "storeSettings": {
+                "type": "AzureBlobFSWriteSettings",
+                "copyBehavior": "PreserveHierarchy"
+              }
+            },
+            "enableStaging": false,
+            "validateDataConsistency": true,
+            "skipErrorFile": {
+              "dataInconsistency": false
+            }
+          }
+        },
+        {
+          "name": "delete_staging",
+          "type": "Delete",
+          "dependsOn": [
+            {
+              "activity": "publish_csv",
+              "dependencyConditions": [
+                "Succeeded"
+              ]
+            }
+          ],
+          "policy": {
+            "timeout": "0.02:00:00",
+            "retry": 5,
+            "retryIntervalInSeconds": 60,
+            "secureOutput": false,
+            "secureInput": false
+          },
+          "typeProperties": {
+            "dataset": {
+              "referenceName": "ds_instacart_adls_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "file_system": "landing",
+                "folder_path": {
+                  "value": "@concat('_staging/instacart/', pipeline().parameters.table_name, '/release=2017')",
+                  "type": "Expression"
+                },
+                "file_name": ""
+              }
+            },
+            "enableLogging": false,
+            "storeSettings": {
+              "type": "AzureBlobFSReadSettings",
+              "recursive": true
+            }
+          }
+        },
+        {
+          "name": "write_success",
+          "type": "Copy",
+          "dependsOn": [
+            {
+              "activity": "delete_staging",
+              "dependencyConditions": [
+                "Succeeded"
+              ]
+            }
+          ],
+          "policy": {
+            "timeout": "0.02:00:00",
+            "retry": 5,
+            "retryIntervalInSeconds": 60,
+            "secureOutput": false,
+            "secureInput": false
+          },
+          "inputs": [
+            {
+              "referenceName": "ds_instacart_adls_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "file_system": "landing",
+                "folder_path": "ops",
+                "file_name": "_SUCCESS"
+              }
+            }
+          ],
+          "outputs": [
+            {
+              "referenceName": "ds_instacart_adls_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "file_system": "landing",
+                "folder_path": {
+                  "value": "@concat('instacart/', pipeline().parameters.table_name, '/release=2017')",
+                  "type": "Expression"
+                },
+                "file_name": "_SUCCESS"
+              }
+            }
+          ],
+          "typeProperties": {
+            "source": {
+              "type": "BinarySource",
+              "storeSettings": {
+                "type": "AzureBlobFSReadSettings",
+                "recursive": false
+              }
+            },
+            "sink": {
+              "type": "BinarySink",
+              "storeSettings": {
+                "type": "AzureBlobFSWriteSettings",
+                "copyBehavior": "PreserveHierarchy"
+              }
+            },
+            "enableStaging": false,
+            "validateDataConsistency": true,
+            "skipErrorFile": {
+              "dataInconsistency": false
+            }
+          }
+        }
+      ],
+      "ifFalseActivities": [
+        {
+          "name": "fail_rows",
+          "type": "Fail",
+          "dependsOn": [],
+          "typeProperties": {
+            "message": {
+              "value": "@concat('Số dòng không khớp cho ', pipeline().parameters.table_name, '; cần ', pipeline().parameters.expected_rows)",
+              "type": "Expression"
+            },
+            "errorCode": "INSTACART_ROW_COUNT"
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "get_written_success",
+    "type": "GetMetadata",
+    "dependsOn": [
+      {
+        "activity": "if_rows_match",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ],
+    "policy": {
+      "timeout": "0.02:00:00",
+      "retry": 5,
+      "retryIntervalInSeconds": 60,
+      "secureOutput": false,
+      "secureInput": false
+    },
+    "typeProperties": {
+      "dataset": {
+        "referenceName": "ds_instacart_adls_binary",
+        "type": "DatasetReference",
+        "parameters": {
+          "file_system": "landing",
+          "folder_path": {
+            "value": "@concat('instacart/', pipeline().parameters.table_name, '/release=2017')",
+            "type": "Expression"
+          },
+          "file_name": "_SUCCESS"
+        }
+      },
+      "fieldList": [
+        "exists"
+      ],
+      "storeSettings": {
+        "type": "AzureBlobFSReadSettings",
+        "recursive": false
+      }
+    }
+  },
+  {
+    "name": "if_marker_exists",
+    "type": "IfCondition",
+    "dependsOn": [
+      {
+        "activity": "get_written_success",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ],
+    "typeProperties": {
+      "expression": {
+        "value": "@activity('get_written_success').output.exists",
+        "type": "Expression"
+      },
+      "ifTrueActivities": [],
+      "ifFalseActivities": [
+        {
+          "name": "fail_missing_marker",
+          "type": "Fail",
+          "dependsOn": [],
+          "typeProperties": {
+            "message": "Chưa có _SUCCESS sau khi Copy marker.",
+            "errorCode": "INSTACART_MISSING_MARKER"
+          }
+        }
+      ]
+    }
+  }
+]

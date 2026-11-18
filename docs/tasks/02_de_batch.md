@@ -343,6 +343,31 @@ Bước 1 của luồng: 6 file Instacart vào landing/instacart/<bảng>/releas
 - [ ] Chạy lại lần hai bỏ qua cả 6 bảng, không ghi thêm file
 - [ ] Không còn file trong landing/_staging/instacart
 
+**Kết quả chuẩn bị AD-DE-06 (2026-11-17)**
+
+- Đã có activities JSON `pl_ingest_instacart` và pipeline con `pl_ingest_instacart_table`,
+  settings tham số/concurrency, ba dataset contract, catalog sáu nguồn và template `_SUCCESS` 0 byte.
+  Script `scripts/build_instacart_adf.py` dựng/kiểm đồng bộ các JSON; hướng dẫn bàn giao ở `adf/README.md`.
+- ForEach tuần tự, bỏ qua bảng có marker; pipeline con kiểm template, Copy CSV có mapping,
+  so cả rowsRead/rowsCopied với expected, Binary publish → Delete staging → ghi/xác nhận marker.
+  Tách pipeline để không lồng If trong If; tên đường dẫn cố định theo release, có retry và kiểm consistency Binary.
+- Đã đối chiếu metadata Zenodo, MD5/header, `csv.reader` và `wc -l` của sáu CSV thật:
+  orders 3.421.083; prior 32.434.489; train 1.384.617; products 49.688; aisles 134; departments 21.
+  Nguồn không nén, không dùng ZipDeflate; số đếm khớp data dictionary. Báo cáo ở
+  `data/ad_de_06_verification.json`, dữ liệu thật/báo cáo local đã gitignore.
+- **16 test ADF local**, toàn bộ **113 test Python**, Ruff và SDK model round-trip
+  (`azure-mgmt-datafactory==9.2.0`, 2 pipeline/3 dataset) đều đạt.
+  Test đọc JSON thực, dùng fixture/file local kiểm lần hai chỉ đọc, lỗi copy/publish/delete/marker,
+  thiếu/sai count, marker sai/thiếu và retry; đây không phải engine/debug ADF.
+- Workflow `adf-checks` kiểm JSON tái tạo, SDK và luồng local, không dùng quyền cloud.
+- **Chưa nghiệm thu Azure:** AD-OPS-25 (#27) còn mở, chưa export/debug Studio, publish hoặc chạy factory thật.
+  P1 cần nạp dataset/linked service, settings String JSON + concurrency 1 và cả hai pipeline qua #27/#28;
+  ba tiêu chí G1 trên giữ chưa tick. Không tạo/sửa tài nguyên Azure hay bật lịch trong phiên này.
+
+**Bổ sung sau review:** Expression đặt trên toàn bộ translator (`translator_json`), HTTP tự nhận LF/CRLF,
+kiểm template không retry; checklist stack 40 liệt kê rõ pipeline con, ba dataset, template và settings.
+Bộ mô phỏng local chỉ hỗ trợ dependency Succeeded và tập biểu thức đang dùng, không thay thế ADF thật.
+
 ### AD-DE-07
 
 **Dựng ADF pl_ingest_retail_db đọc CDC theo LSN**

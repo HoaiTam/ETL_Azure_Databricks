@@ -1,0 +1,31 @@
+# Chỉ kiểm JSON/model và luồng local, không đăng nhập hoặc publish Azure.
+name: adf-checks
+
+on:
+  pull_request:
+    paths:
+      - 'adf/**'
+      - 'scripts/build_instacart_adf.py'
+      - 'tests/adf_runtime.py'
+      - 'tests/test_adf_instacart.py'
+      - '.github/workflows/adf-checks.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: adf-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  adf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Kiểm JSON tái tạo và model Azure SDK
+        run: uv run --frozen --with azure-mgmt-datafactory==9.2.0 python scripts/build_instacart_adf.py --check --sdk-check
+      - name: Kiểm luồng trên file local
+        run: uv run --frozen pytest tests/test_adf_instacart.py -q

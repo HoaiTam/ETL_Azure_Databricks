@@ -1,0 +1,8 @@
+{
+  "concurrency": 1,
+  "parameters": {
+    "table_name": "",
+    "expected_rows": "0",
+    "translator_json": "{}"
+  }
+}

@@ -1,0 +1,97 @@
+[
+  {
+    "name": "for_each_table",
+    "type": "ForEach",
+    "dependsOn": [],
+    "description": "Lần hai chỉ kiểm marker và bỏ qua; không dùng biến dùng chung trong vòng lặp.",
+    "typeProperties": {
+      "items": {
+        "value": "@json(pipeline().parameters.tables_json)",
+        "type": "Expression"
+      },
+      "isSequential": true,
+      "activities": [
+        {
+          "name": "get_success",
+          "type": "GetMetadata",
+          "dependsOn": [],
+          "policy": {
+            "timeout": "0.02:00:00",
+            "retry": 5,
+            "retryIntervalInSeconds": 60,
+            "secureOutput": false,
+            "secureInput": false
+          },
+          "typeProperties": {
+            "dataset": {
+              "referenceName": "ds_instacart_adls_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "file_system": "landing",
+                "folder_path": {
+                  "value": "@concat('instacart/', item(), '/release=2017')",
+                  "type": "Expression"
+                },
+                "file_name": "_SUCCESS"
+              }
+            },
+            "fieldList": [
+              "exists"
+            ],
+            "storeSettings": {
+              "type": "AzureBlobFSReadSettings",
+              "recursive": false
+            }
+          }
+        },
+        {
+          "name": "if_not_published",
+          "type": "IfCondition",
+          "dependsOn": [
+            {
+              "activity": "get_success",
+              "dependencyConditions": [
+                "Succeeded"
+              ]
+            }
+          ],
+          "typeProperties": {
+            "expression": {
+              "value": "@not(activity('get_success').output.exists)",
+              "type": "Expression"
+            },
+            "ifTrueActivities": [
+              {
+                "name": "ingest_one_table",
+                "type": "ExecutePipeline",
+                "dependsOn": [],
+                "typeProperties": {
+                  "pipeline": {
+                    "referenceName": "pl_ingest_instacart_table",
+                    "type": "PipelineReference"
+                  },
+                  "waitOnCompletion": true,
+                  "parameters": {
+                    "table_name": {
+                      "value": "@item()",
+                      "type": "Expression"
+                    },
+                    "expected_rows": {
+                      "value": "@string(json(pipeline().parameters.expected_rows)[item()])",
+                      "type": "Expression"
+                    },
+                    "translator_json": {
+                      "value": "@string(json(pipeline().parameters.translators_json)[item()])",
+                      "type": "Expression"
+                    }
+                  }
+                }
+              }
+            ],
+            "ifFalseActivities": []
+          }
+        }
+      ]
+    }
+  }
+]
