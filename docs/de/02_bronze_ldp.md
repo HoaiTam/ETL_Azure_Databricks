@@ -47,6 +47,12 @@ Runtime của pipeline do `channel` (`CURRENT` / `PREVIEW`) quyết định, kh�
 
 ### 2.2 Resource pipeline
 
+**Bản đang triển khai ở AD-DE-08:** [bundle và hướng dẫn nghiệm thu](../../bundles/README.md).
+Bundle dùng glob thư mục batch và một materialized view private để smoke test khi các file tầng
+nghiệp vụ chưa có. Danh sách file dưới đây minh họa cấu trúc đích khi các task bronze/silver/gold
+hoàn tất, không phải danh sách source đã được triển khai. DDL schema dev sinh bằng
+`scripts/dev_schema_sql.py`; chỉ chạy trên warehouse sau khi xác nhận prefix đã resolve.
+
 ```yaml
 # bundles/resources/pipeline_batch.yml
 variables:
