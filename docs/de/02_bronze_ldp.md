@@ -144,7 +144,7 @@ def autoload(path: str, fmt: str, schema: str | None = None, **opts):
     for k, v in opts.items():
         r = r.option(k, v)
     if schema:
-        r = r.schema(schema)                             # schema cố định → cột lạ vào _rescued_data
+        r = r.schema(f"{schema}, _rescued_data STRING")    # khai báo cột rescue với schema cố định
     return (r.load(path)
             .withColumn("_source_file", F.col("_metadata.file_path"))
             .withColumn("_file_mtime", F.col("_metadata.file_modification_time"))
@@ -171,7 +171,7 @@ def make_csv_table(table: str, folder: str, schema: str):
               table_properties=BRONZE_PROPS)
     def _t():
         return autoload(f"{LANDING}/instacart/{folder}/", "csv", schema,
-                        header="true", pathGlobFilter="*.csv",
+                        header="true", quote='"', escape='"', mode="FAILFAST", pathGlobFilter="*.csv",
                         **{"cloudFiles.schemaEvolutionMode": "rescue"})
 
 
@@ -181,7 +181,11 @@ for t, (folder, schema) in CSV_TABLES.items():
 
 **Ghi chú:**
 - `order_products_train` **có** nạp vào bronze, nhưng **không** đi vào silver bằng đường batch. Nó chỉ dùng để đối soát với luồng stream (131.209 đơn / 1.384.617 dòng) và để DS tham chiếu.
-- `products.csv` có tên chứa dấu phẩy trong ngoặc kép. Auto Loader CSV mặc định xử lý `quote="\""`, nên không cần thêm tùy chọn. Kiểm tra lại bằng `count` và `_rescued_data IS NOT NULL` (mục 6).
+- `products.csv` có tên chứa dấu phẩy và dấu ngoặc kép kép (`"Cookies ""Classic"""`).
+  Source dùng `quote='"', escape='"'` để giữ đúng quy tắc CSV của nguồn; không đặt `lineSep`
+  để đọc cả LF/CRLF. Kiểm tra lại bằng `count` và `_rescued_data IS NOT NULL` (mục 6).
+- CSV dùng `mode="FAILFAST"`: bản ghi sai cú pháp làm update lỗi để xử lý nguồn,
+  không bị bỏ qua. Auto Loader vẫn rescue lỗi kiểu/schema khi có `rescuedDataColumn`.
 - Không đặt `cloudFiles.schemaLocation` / `checkpointLocation`. LDP tự lưu những thứ này trong storage của pipeline và gắn với từng bảng.
 
 ### 3.2 Bảng CDC từ Azure SQL
@@ -253,7 +257,8 @@ databricks bundle run instacart_batch -t dev --refresh bronze.orders   # chỉ r
 | Tình huống | Hành vi của Auto Loader / LDP | Việc cần làm |
 |---|---|---|
 | Update lỗi giữa chừng (mất cluster, OOM) | Checkpoint chỉ ghi nhận các micro-batch **đã commit**. Micro-batch dở bị bỏ, Delta không thấy commit dở | Chạy lại update. File chưa commit được đọc lại, file đã commit không bị đọc lại |
-| File CSV lỗi định dạng một vài dòng | Dòng không khớp schema → cột `_rescued_data` khác null, không làm dừng pipeline | Silver đưa các dòng đó vào quarantine ([03 §4](03_silver_cdc_scd_dq.md)) |
+| CSV có cột lạ hoặc sai kiểu | Auto Loader đưa giá trị lệch schema vào `_rescued_data` | Silver đưa dòng đó vào quarantine ([03 §4](03_silver_cdc_scd_dq.md)) |
+| CSV sai cú pháp, không phân tích được | Source dùng `FAILFAST`, update lỗi thay vì bỏ bản ghi | Điều tra file qua event log, sửa nguồn theo quy tắc landing bất biến rồi chạy lại |
 | Nguồn thêm cột (Parquet/JSON) | `addNewColumns`: flow dừng một lần, LDP tự khởi động lại với schema mới | Không cần làm gì; kiểm tra event log |
 | Cần nạp lại **một file** đã nạp | Auto Loader không đọc lại file cùng đường dẫn | Chép file sang đường dẫn mới (ví dụ thêm hậu tố `_fix1`), silver loại trùng theo khóa |
 | Lỡ bấm **Full refresh all** | Bảng có `pipelines.reset.allowed = false` bị **bỏ qua**, không xóa | Chỉ silver/gold bị tính lại |
@@ -283,3 +288,10 @@ SELECT _op, count(*) FROM instacart.bronze.promotions_cdc GROUP BY _op;         
 - [ ] Các số trên khớp. Chạy `bundle run` lần hai: số dòng **không đổi**, flow báo 0 dòng mới.
 - [ ] Thử *Full refresh all* trên pipeline dev: bronze giữ nguyên số dòng.
 - [ ] Ghi kết quả vào `ops.reconciliation` bằng task `reconcile` ([06 §4](06_van_hanh_chay_lai.md)).
+
+### Phần triển khai AD-DE-09
+
+AD-DE-09 triển khai sáu bảng CSV trong [`src/pipelines/batch/bronze.py`](../../src/pipelines/batch/bronze.py).
+Các mục CDC/OFF ở trên mô tả thiết kế khi nguồn AD-DE-07 và AD-DE-10 đã sẵn sàng.
+Hướng dẫn chuẩn bị nguồn, thử lần hai/full refresh và ghi bằng chứng:
+[02b · Nghiệm thu bronze](02b_nghiem_thu_bronze.md). Test local không thay cho nghiệm thu Auto Loader.

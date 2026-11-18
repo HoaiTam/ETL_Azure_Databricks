@@ -22,7 +22,10 @@ CI deploy dev bằng SP CI nên `<user>` khi đó là short name của SP, khác
 - `bootstrap.py` tạo một materialized view **private** `_batch_bootstrap`, đúng một dòng
   cấu hình, không công bố bảng nghiệp vụ vào UC và không đọc landing. Nó giúp update smoke
   và event log có đồ thị chạy trước khi có bronze. Không dùng kết quả này để xác nhận ETL.
-- Bronze, silver, gold nghiệp vụ, thu thập DQ và job điều phối thuộc các task sau.
+- `bronze.py` (AD-DE-09) nạp sáu bảng CSV Instacart từ landing. Update pipeline
+  chạy cả bronze và smoke, với dữ liệu đã công bố cùng quyền đọc volume raw.
+  Xem [nghiệm thu bronze](../docs/de/02b_nghiem_thu_bronze.md). Silver, gold, thu thập DQ
+  và job điều phối thuộc các task sau.
   `warehouse_id` đã khai báo cho AD-DE-18, pipeline hiện tại không dùng warehouse.
 - Schema prod, catalog, volume, warehouse, policy và quyền do Terraform/P1 quản lý.
   Schema dev tạo một lần bằng DDL bên dưới; bundle cleanup không sở hữu/xóa bốn schema này.
@@ -31,7 +34,7 @@ CI deploy dev bằng SP CI nên `<user>` khi đó là short name của SP, khác
 
 1. AD-OPS-19 (#21), AD-OPS-20 (#22), AD-OPS-21 (#23) phải được nghiệm thu: có catalog,
    managed storage, volume raw, hai policy `instacart-single-node` / `instacart-pipeline-single-node`
-   và warehouse `wh-instacart-bi` để các lookup của bundle resolve được.
+   và warehouse `wh-instacart-bi` (AD-OPS-22 #24) để các lookup của bundle resolve được.
 2. Có Databricks CLI hiện hành và đăng nhập bằng **profile người chạy đã chọn**. Không tự lấy
    profile đầu tiên. Cài/đăng nhập theo `databricks-core` hoặc `/databricks:setup` nếu còn thiếu.
 3. Danh tính deploy/run có `USE CATALOG`, `CREATE SCHEMA` trên catalog; trên các schema dev
