@@ -9,13 +9,14 @@ resources:
       channel: CURRENT
       serverless: false
       continuous: false
-      development: false # target dev ghi đè; prod giữ cơ chế retry mặc định của nền tảng
       photon: false
       clusters:
         - label: default
           policy_id: ${var.pipeline_policy_id}
           node_type_id: ${var.node_type_id}
           num_workers: 0
+          spark_conf:
+            spark.databricks.cluster.profile: singleNode
           custom_tags:
             owner: p2
       configuration:

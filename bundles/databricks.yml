@@ -49,7 +49,6 @@ targets:
     resources:
       pipelines:
         instacart_batch:
-          development: true
           configuration:
             pipelines.numUpdateRetryAttempts: "0"
             pipelines.maxFlowRetryAttempts: "0"
