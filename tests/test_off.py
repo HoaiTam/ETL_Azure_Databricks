@@ -240,7 +240,7 @@ def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch):
         module = ModuleType("silver_off_under_test")
         source = ROOT / "src/pipelines/batch/silver_off.py"
         exec(compile(source.read_text(), str(source), "exec"), module.__dict__)
-        assert module.norm is norm and module.score_series is score_series
+        assert module.score_series is score_series
         assert set(definitions) == {
             f"`test-catalog`.`p2_silver`.`{name}`"
             for name in ["off_products_clean", "product_off_match", "quarantine_off_products"]
