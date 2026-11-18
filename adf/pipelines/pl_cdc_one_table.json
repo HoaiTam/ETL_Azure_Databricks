@@ -1,0 +1,447 @@
+[
+  {
+    "name": "reject_missing_run_id",
+    "type": "IfCondition",
+    "typeProperties": {
+      "expression": {
+        "type": "Expression",
+        "value": "@empty(trim(pipeline().parameters.parent_run_id))"
+      },
+      "ifTrueActivities": [
+        {
+          "name": "missing_run_id",
+          "type": "Fail",
+          "typeProperties": {
+            "errorCode": "RetailCdcContract",
+            "message": "Cần ID lượt ingest để ghi log và chạy lại cùng cửa sổ."
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "lk_window",
+    "type": "Lookup",
+    "typeProperties": {
+      "source": {
+        "type": "AzureSqlSource",
+        "sqlReaderStoredProcedureName": "etl.usp_get_cdc_window",
+        "storedProcedureParameters": {
+          "capture_instance": {
+            "value": {
+              "type": "Expression",
+              "value": "@pipeline().parameters.ci"
+            },
+            "type": "String"
+          }
+        },
+        "partitionOption": "None"
+      },
+      "dataset": {
+        "referenceName": "ds_retail_cdc_sql",
+        "type": "DatasetReference"
+      },
+      "firstRowOnly": true
+    },
+    "dependsOn": [
+      {
+        "activity": "reject_missing_run_id",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ],
+    "policy": {
+      "timeout": "0.01:00:00",
+      "retry": 2,
+      "retryIntervalInSeconds": 30
+    }
+  },
+  {
+    "name": "switch_window_mode",
+    "type": "Switch",
+    "typeProperties": {
+      "on": {
+        "type": "Expression",
+        "value": "@activity('lk_window').output.firstRow.mode"
+      },
+      "cases": [
+        {
+          "value": "empty",
+          "activities": [
+            {
+              "name": "set_watermark_empty",
+              "type": "SqlServerStoredProcedure",
+              "typeProperties": {
+                "storedProcedureName": "etl.usp_set_cdc_watermark",
+                "storedProcedureParameters": {
+                  "capture_instance": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@pipeline().parameters.ci"
+                    },
+                    "type": "String"
+                  },
+                  "to_lsn": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@activity('lk_window').output.firstRow.to_lsn"
+                    },
+                    "type": "String"
+                  },
+                  "adf_run_id": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@pipeline().parameters.parent_run_id"
+                    },
+                    "type": "String"
+                  },
+                  "mode": {
+                    "value": "empty",
+                    "type": "String"
+                  },
+                  "rows": {
+                    "value": 0,
+                    "type": "Int64"
+                  }
+                }
+              },
+              "linkedServiceName": {
+                "referenceName": "ls_sql_retail",
+                "type": "LinkedServiceReference"
+              },
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30
+              }
+            }
+          ]
+        },
+        {
+          "value": "snapshot",
+          "activities": [
+            {
+              "name": "copy_snapshot",
+              "type": "Copy",
+              "typeProperties": {
+                "source": {
+                  "type": "AzureSqlSource",
+                  "sqlReaderQuery": {
+                    "type": "Expression",
+                    "value": "@concat('SELECT _lsn = ''', activity('lk_window').output.firstRow.to_lsn, ''', ''0x00000000000000000000'' AS _seqval, 0 AS _op, CAST(NULL AS binary(10)) AS [__$start_lsn], CAST(NULL AS binary(10)) AS [__$seqval], CAST(NULL AS int) AS [__$operation], CAST(NULL AS varbinary(128)) AS [__$update_mask], ', json('{\"dbo_product_prices\":\"[product_id], [unit_price], [currency], [updated_at]\",\"dbo_promotions\":\"[promo_id], [product_id], [promo_type], [discount_pct], [start_date], [end_date], [updated_at]\"}')[pipeline().parameters.ci], ' FROM ', json('{\"dbo_product_prices\":\"dbo.[product_prices]\",\"dbo_promotions\":\"dbo.[promotions]\"}')[pipeline().parameters.ci])"
+                  },
+                  "partitionOption": "None"
+                },
+                "sink": {
+                  "type": "ParquetSink",
+                  "storeSettings": {
+                    "type": "AzureBlobFSWriteSettings"
+                  },
+                  "formatSettings": {
+                    "type": "ParquetWriteSettings"
+                  }
+                },
+                "enableStaging": false,
+                "parallelCopies": 1
+              },
+              "inputs": [
+                {
+                  "referenceName": "ds_retail_cdc_sql",
+                  "type": "DatasetReference"
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "ds_retail_cdc_parquet",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "folder_path": {
+                      "type": "Expression",
+                      "value": "@concat('_staging/retail_db/', json('{\"dbo_product_prices\":\"product_prices\",\"dbo_promotions\":\"promotions\"}')[pipeline().parameters.ci], '/', concat('snapshot=', activity('lk_window').output.firstRow.to_lsn))"
+                    },
+                    "file_name": "part-00000.parquet"
+                  }
+                }
+              ],
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30
+              }
+            },
+            {
+              "name": "publish_snapshot",
+              "type": "ExecutePipeline",
+              "typeProperties": {
+                "pipeline": {
+                  "referenceName": "pl_cdc_publish_slice",
+                  "type": "PipelineReference"
+                },
+                "parameters": {
+                  "ci": {
+                    "type": "Expression",
+                    "value": "@pipeline().parameters.ci"
+                  },
+                  "slice": {
+                    "type": "Expression",
+                    "value": "@concat('snapshot=', activity('lk_window').output.firstRow.to_lsn)"
+                  },
+                  "rows_read": {
+                    "type": "Expression",
+                    "value": "@string(activity('copy_snapshot').output.rowsRead)"
+                  },
+                  "rows_copied": {
+                    "type": "Expression",
+                    "value": "@string(activity('copy_snapshot').output.rowsCopied)"
+                  }
+                },
+                "waitOnCompletion": true
+              },
+              "dependsOn": [
+                {
+                  "activity": "copy_snapshot",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "set_watermark_snapshot",
+              "type": "SqlServerStoredProcedure",
+              "typeProperties": {
+                "storedProcedureName": "etl.usp_set_cdc_watermark",
+                "storedProcedureParameters": {
+                  "capture_instance": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@pipeline().parameters.ci"
+                    },
+                    "type": "String"
+                  },
+                  "to_lsn": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@activity('lk_window').output.firstRow.to_lsn"
+                    },
+                    "type": "String"
+                  },
+                  "adf_run_id": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@pipeline().parameters.parent_run_id"
+                    },
+                    "type": "String"
+                  },
+                  "mode": {
+                    "value": "snapshot",
+                    "type": "String"
+                  },
+                  "rows": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@activity('copy_snapshot').output.rowsCopied"
+                    },
+                    "type": "Int64"
+                  }
+                }
+              },
+              "linkedServiceName": {
+                "referenceName": "ls_sql_retail",
+                "type": "LinkedServiceReference"
+              },
+              "dependsOn": [
+                {
+                  "activity": "publish_snapshot",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ],
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30
+              }
+            }
+          ]
+        },
+        {
+          "value": "window",
+          "activities": [
+            {
+              "name": "copy_window",
+              "type": "Copy",
+              "typeProperties": {
+                "source": {
+                  "type": "AzureSqlSource",
+                  "sqlReaderQuery": {
+                    "type": "Expression",
+                    "value": "@concat('SELECT CONVERT(varchar(22), [__$start_lsn], 1) AS _lsn, CONVERT(varchar(22), [__$seqval], 1) AS _seqval, [__$operation] AS _op, [__$start_lsn], [__$seqval], [__$operation], [__$update_mask], ', json('{\"dbo_product_prices\":\"[product_id], [unit_price], [currency], [updated_at]\",\"dbo_promotions\":\"[promo_id], [product_id], [promo_type], [discount_pct], [start_date], [end_date], [updated_at]\"}')[pipeline().parameters.ci], ' FROM ', json('{\"dbo_product_prices\":\"cdc.[fn_cdc_get_all_changes_dbo_product_prices]\",\"dbo_promotions\":\"cdc.[fn_cdc_get_all_changes_dbo_promotions]\"}')[pipeline().parameters.ci], '(CONVERT(binary(10), ''', activity('lk_window').output.firstRow.from_lsn, ''', 1), CONVERT(binary(10), ''', activity('lk_window').output.firstRow.to_lsn, ''', 1), N''all'')')"
+                  },
+                  "partitionOption": "None"
+                },
+                "sink": {
+                  "type": "ParquetSink",
+                  "storeSettings": {
+                    "type": "AzureBlobFSWriteSettings"
+                  },
+                  "formatSettings": {
+                    "type": "ParquetWriteSettings"
+                  }
+                },
+                "enableStaging": false,
+                "parallelCopies": 1
+              },
+              "inputs": [
+                {
+                  "referenceName": "ds_retail_cdc_sql",
+                  "type": "DatasetReference"
+                }
+              ],
+              "outputs": [
+                {
+                  "referenceName": "ds_retail_cdc_parquet",
+                  "type": "DatasetReference",
+                  "parameters": {
+                    "folder_path": {
+                      "type": "Expression",
+                      "value": "@concat('_staging/retail_db/', json('{\"dbo_product_prices\":\"product_prices\",\"dbo_promotions\":\"promotions\"}')[pipeline().parameters.ci], '/', concat('window=', activity('lk_window').output.firstRow.from_lsn, '_', activity('lk_window').output.firstRow.to_lsn))"
+                    },
+                    "file_name": "part-00000.parquet"
+                  }
+                }
+              ],
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30
+              }
+            },
+            {
+              "name": "publish_window",
+              "type": "ExecutePipeline",
+              "typeProperties": {
+                "pipeline": {
+                  "referenceName": "pl_cdc_publish_slice",
+                  "type": "PipelineReference"
+                },
+                "parameters": {
+                  "ci": {
+                    "type": "Expression",
+                    "value": "@pipeline().parameters.ci"
+                  },
+                  "slice": {
+                    "type": "Expression",
+                    "value": "@concat('window=', activity('lk_window').output.firstRow.from_lsn, '_', activity('lk_window').output.firstRow.to_lsn)"
+                  },
+                  "rows_read": {
+                    "type": "Expression",
+                    "value": "@string(activity('copy_window').output.rowsRead)"
+                  },
+                  "rows_copied": {
+                    "type": "Expression",
+                    "value": "@string(activity('copy_window').output.rowsCopied)"
+                  }
+                },
+                "waitOnCompletion": true
+              },
+              "dependsOn": [
+                {
+                  "activity": "copy_window",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "name": "set_watermark_window",
+              "type": "SqlServerStoredProcedure",
+              "typeProperties": {
+                "storedProcedureName": "etl.usp_set_cdc_watermark",
+                "storedProcedureParameters": {
+                  "capture_instance": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@pipeline().parameters.ci"
+                    },
+                    "type": "String"
+                  },
+                  "to_lsn": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@activity('lk_window').output.firstRow.to_lsn"
+                    },
+                    "type": "String"
+                  },
+                  "adf_run_id": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@pipeline().parameters.parent_run_id"
+                    },
+                    "type": "String"
+                  },
+                  "mode": {
+                    "value": "window",
+                    "type": "String"
+                  },
+                  "rows": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@activity('copy_window').output.rowsCopied"
+                    },
+                    "type": "Int64"
+                  },
+                  "from_lsn": {
+                    "value": {
+                      "type": "Expression",
+                      "value": "@activity('lk_window').output.firstRow.from_lsn"
+                    },
+                    "type": "String"
+                  }
+                }
+              },
+              "linkedServiceName": {
+                "referenceName": "ls_sql_retail",
+                "type": "LinkedServiceReference"
+              },
+              "dependsOn": [
+                {
+                  "activity": "publish_window",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ],
+              "policy": {
+                "timeout": "0.01:00:00",
+                "retry": 2,
+                "retryIntervalInSeconds": 30
+              }
+            }
+          ]
+        }
+      ],
+      "defaultActivities": [
+        {
+          "name": "invalid_window_mode",
+          "type": "Fail",
+          "typeProperties": {
+            "errorCode": "RetailCdcContract",
+            "message": "Lookup trả mode khác empty/snapshot/window."
+          }
+        }
+      ]
+    },
+    "dependsOn": [
+      {
+        "activity": "lk_window",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ]
+  }
+]

@@ -387,7 +387,7 @@ Bộ mô phỏng local chỉ hỗ trợ dependency Succeeded và tập biểu th
 1. Thiết kế pl_cdc_one_table: Lookup usp_get_cdc_window, Switch empty/snapshot/window, Copy Parquet qua _staging, Delete, SP set watermark
 2. Thiết kế pl_ingest_retail_db: ForEach tuần tự 2 bảng gọi pl_cdc_one_table
 3. Export JSON vào adf/pipelines/, mở PR
-4. Chạy snapshot, seed wave 1, chạy lại ra window, chạy lần ba ra empty
+4. Chạy snapshot, seed wave 1, chạy lại ra window, chạy lần ba đối soát empty hoặc window 0 dòng
 5. Thử lỗi giữa chừng (đổi tạm tên bảng) và rerun from failed
 
 **Đầu ra**
@@ -400,8 +400,17 @@ Bộ mô phỏng local chỉ hỗ trợ dependency Succeeded và tập biểu th
 
 - [ ] etl.run_log có 2 dòng snapshot, sau wave 1 có 2 dòng window với rows_copied > 0
 - [ ] Parquet window của promotions có _op = 1 và _op = 4
-- [ ] Chạy hai lần liên tiếp không seed: lần hai mode = empty, không có thư mục mới
+- [ ] Chạy hai lần liên tiếp không seed: lần hai mode empty hoặc window có rows_copied = 0, không có thư mục mới
 - [ ] Bắn lỗi rồi rerun: watermark không đổi trước khi sửa, không mất thay đổi
+
+**Kết quả chuẩn bị AD-DE-07**
+
+- Đã dựng ba pipeline, settings và hai dataset SQL/Parquet, dùng lại dataset Binary. `pl_cdc_publish_slice` kiểm số dòng,
+  công bố và dọn staging trước khi pipeline con ghi watermark của bảng. Hướng dẫn ở
+  [ADF retail CDC](../../adf/README_RETAIL_CDC.md).
+- Kiểm JSON bằng Azure SDK và mô phỏng local các tuyến snapshot, window, empty, cửa sổ 0 dòng,
+  lỗi giữa chừng và phục hồi. Giữ các ô nghiệm thu Azure chưa tick cho đến khi có kết quả thật.
+- AD-DE-04 (#40), AD-DE-05 (#41) và linked service AD-OPS-25 (#27) đã sẵn sàng. Trước merge cần P1 xác nhận plan 40-orchestration, sau merge workflow publish rồi mới nghiệm thu Azure.
 
 ### AD-DE-08
 
@@ -828,8 +837,10 @@ DS cần bản dữ liệu cố định data_version v1, mã hóa item tất đ�
 
 **Xong khi**
 
-- [ ] Test local xanh: chạy hai lần cho cùng kết quả, không nhân dòng
-- [ ] idx tất định: tính lại ra cùng idx
+- [x] Test local xanh: chạy hai lần cho cùng kết quả, không nhân dòng
+- [x] idx tất định: tính lại ra cùng idx
+
+`tests/test_ds_prepare.py` chạy ba file SQL trên Spark + Delta local. Fixture kiểm hai phiên bản, vị trí món stream và mã `idx` khi đồng hạng tần suất. Nghiệm thu trên workspace G3 chờ nguồn silver của AD-DE-15. Job, file xuất và lần chạy `v1` thuộc AD-DE-21.
 
 ### AD-DE-21
 

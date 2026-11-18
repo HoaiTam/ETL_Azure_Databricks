@@ -1,0 +1,36 @@
+[
+  {
+    "name": "for_each_capture_instance",
+    "type": "ForEach",
+    "typeProperties": {
+      "items": {
+        "type": "Expression",
+        "value": "@json('[\"dbo_product_prices\", \"dbo_promotions\"]')"
+      },
+      "isSequential": true,
+      "activities": [
+        {
+          "name": "ingest_one_table",
+          "type": "ExecutePipeline",
+          "typeProperties": {
+            "pipeline": {
+              "referenceName": "pl_cdc_one_table",
+              "type": "PipelineReference"
+            },
+            "parameters": {
+              "ci": {
+                "type": "Expression",
+                "value": "@item()"
+              },
+              "parent_run_id": {
+                "type": "Expression",
+                "value": "@pipeline().RunId"
+              }
+            },
+            "waitOnCompletion": true
+          }
+        }
+      ]
+    }
+  }
+]
