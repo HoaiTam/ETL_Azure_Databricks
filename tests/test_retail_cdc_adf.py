@@ -1,178 +1,90 @@
 """Chạy contract của JSON đã commit trên mô hình local. Azure vẫn cần nghiệm thu riêng."""
 
 import json
-import operator
-import re
 from pathlib import Path
-from urllib.parse import quote
 
 import pytest
 
 from build_retail_cdc_adf import artifacts
+from tests.adf_runtime import LocalADF
 
 ADF = Path(__file__).resolve().parents[1] / "adf"
 FROM = "0x00000000000000000002"
 TO = "0x00000000000000000014"
 RUN = "original-parent-run"
-TOKEN = re.compile(r"'(?:[^']|'')*'|[A-Za-z_]\w*|-?\d+|[().,\[\]]")
 
 
 def read(kind, name):
     return json.loads((ADF / kind / f"{name}.json").read_text())
 
 
-def evaluate(value, functions):
-    if not isinstance(value, dict) or value.get("type") != "Expression":
-        return value
-    tokens = TOKEN.findall(value["value"][1:])
-    pos = 0
-
-    def take(expected=None):
-        nonlocal pos
-        token = tokens[pos]
-        pos += 1
-        if expected is not None:
-            assert token == expected, (token, expected, value)
-        return token
-
-    def peek():
-        return tokens[pos] if pos < len(tokens) else None
-
-    def parse():
-        token = take()
-        if token.startswith("'"):
-            result = token[1:-1].replace("''", "'")
-        elif token.lstrip("-").isdigit():
-            result = int(token)
-        else:
-            take("(")
-            args = []
-            if peek() != ")":
-                args.append(parse())
-                while peek() == ",":
-                    take(",")
-                    args.append(parse())
-            take(")")
-            result = functions[token](*args)
-        while peek() in (".", "["):
-            if take() == ".":
-                result = result[take()]
-            else:
-                result = result[parse()]
-                take("]")
-        return result
-
-    result = parse()
-    assert pos == len(tokens)
-    return result
-
-
-class RetailRun:
-    def __init__(self, mode="window", rows=2, *, read_rows=None, missing_stats=False, creates_file=None, failure=None):
+class RetailRun(LocalADF):
+    def __init__(
+        self,
+        tmp_path,
+        mode="window",
+        rows=2,
+        *,
+        read_rows=None,
+        missing_stats=False,
+        creates_file=None,
+        failure=None,
+    ):
+        super().__init__(root=tmp_path, source=tmp_path, repository=ADF.parent)
+        self.run_id = RUN
         self.lookup = {"mode": mode, "from_lsn": FROM if mode == "window" else None, "to_lsn": TO}
         self.rows = rows
         self.read_rows = rows if read_rows is None else read_rows
         self.creates_file = rows > 0 if creates_file is None else creates_file
         self.missing_stats = missing_stats
-        self.failure = failure
-        self.stage = set()
-        self.landing = set()
-        self.calls = []
+        self.fail_at = (failure, "before") if failure else None
         self.commits = []
         self.queries = []
 
-    def run(self, pipeline="pl_ingest_retail_db", params=None):
-        outputs = {}
-        functions = {
-            "activity": lambda name: {"output": outputs[name]},
-            "pipeline": lambda: {"parameters": params or {}, "RunId": RUN},
-            "json": json.loads,
-            "concat": lambda *ss: "".join(ss),
-            "string": str,
-            "int": int,
-            "and": lambda *xs: all(xs),
-            "or": lambda *xs: any(xs),
-            "not": operator.not_,
-            "equals": operator.eq,
-            "greater": operator.gt,
-            "greaterOrEquals": operator.ge,
-            "empty": operator.not_,
-            "trim": str.strip,
-            "length": len,
-            "replace": str.replace,
-            "startsWith": str.startswith,
-            "uriComponent": lambda s: quote(s, safe=""),
-        }
+    @property
+    def calls(self):
+        return [name for name, _ in self.trace]
 
-        def ev(value):
-            return evaluate(value, functions)
+    @property
+    def stage(self):
+        return set((self.root / "landing/_staging/retail_db").glob("*/*"))
 
-        def path(ref):
-            keys = ref["parameters"]
-            return f"{ev(keys['folder_path'])}/{ev(keys['file_name'])}"
+    @property
+    def landing(self):
+        return {str(file.relative_to(self.root / "landing")) for file in self._landing_files()}
 
-        def activities(nodes):
-            for node in nodes:
-                name, kind, props = node["name"], node["type"], node["typeProperties"]
-                assert all(
-                    dependency["activity"] in outputs and dependency["dependencyConditions"] == ["Succeeded"]
-                    for dependency in node.get("dependsOn", [])
-                )
-                self.calls.append(name)
-                if name == self.failure:
-                    raise RuntimeError(name)
-                output = {}
-                if kind == "ForEach":
-                    assert props["isSequential"] is True
-                    for item in ev(props["items"]):
-                        functions["item"] = lambda item=item: item
-                        activities(props["activities"])
-                elif kind == "ExecutePipeline":
-                    assert props["waitOnCompletion"] is True
-                    self.run(props["pipeline"]["referenceName"], {k: ev(v) for k, v in props["parameters"].items()})
-                elif kind == "Lookup":
-                    assert props["source"]["sqlReaderStoredProcedureName"] == "etl.usp_get_cdc_window"
-                    assert props["firstRowOnly"] is True
-                    assert ev(props["source"]["storedProcedureParameters"]["capture_instance"]["value"]) in (
-                        "dbo_product_prices",
-                        "dbo_promotions",
-                    )
-                    output = {"firstRow": self.lookup}
-                elif kind == "Switch":
-                    branches = {c["value"]: c["activities"] for c in props["cases"]}
-                    activities(branches.get(ev(props["on"]), props["defaultActivities"]))
-                elif kind == "IfCondition":
-                    if ev(props["expression"]):
-                        activities(props["ifTrueActivities"])
-                elif kind == "Copy":
-                    dest = path(node["outputs"][0])
-                    if props["source"]["type"] == "AzureSqlSource":
-                        self.queries.append(ev(props["source"]["sqlReaderQuery"]))
-                        if self.creates_file:
-                            self.stage.add(dest)
-                        output = {"rowsRead": self.read_rows}
-                        if not self.missing_stats:
-                            output["rowsCopied"] = self.rows
-                    else:
-                        assert props["validateDataConsistency"] is True
-                        assert path(node["inputs"][0]) in self.stage
-                        self.landing.add(dest)
-                elif kind == "GetMetadata":
-                    assert props["fieldList"] == ["exists"]
-                    output = {"exists": path(props["dataset"]) in self.stage | self.landing}
-                elif kind == "Delete":
-                    assert props["storeSettings"]["recursive"] is False
-                    self.stage.remove(path(props["dataset"]))
-                elif kind == "SqlServerStoredProcedure":
-                    assert props["storedProcedureName"] == "etl.usp_set_cdc_watermark"
-                    self.commits.append({k: ev(v["value"]) for k, v in props["storedProcedureParameters"].items()})
-                elif kind == "Fail":
-                    raise RuntimeError(name)
-                else:
-                    raise AssertionError(f"Activity chưa có trong mô hình test: {kind}")
-                outputs[name] = output
+    def _landing_files(self):
+        return (self.root / "landing/retail_db").rglob("*.parquet")
 
-        activities(read("pipelines", pipeline))
+    def run(self, pipeline="pl_ingest_retail_db", **parameters):
+        return super().run(pipeline, **parameters)
+
+    def sql_activity(self, activity, context):
+        kind, props = activity["type"], activity["typeProperties"]
+        if kind == "Lookup":
+            sql = props["source"]
+            assert sql["sqlReaderStoredProcedureName"] == "etl.usp_get_cdc_window"
+            assert props["firstRowOnly"] is True
+            assert self.value(sql["storedProcedureParameters"]["capture_instance"]["value"], context) in (
+                "dbo_product_prices",
+                "dbo_promotions",
+            )
+            return {"firstRow": self.lookup}
+        if kind == "Copy":
+            self.queries.append(self.value(props["source"]["sqlReaderQuery"], context))
+            dest, _ = self.dataset(activity["outputs"][0], context)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if self.creates_file:
+                dest.write_bytes(b"PAR1")
+            output = {"rowsRead": self.read_rows}
+            if not self.missing_stats:
+                output["rowsCopied"] = self.rows
+            return output
+        assert props["storedProcedureName"] == "etl.usp_set_cdc_watermark"
+        self.commits.append(
+            {key: self.value(value["value"], context) for key, value in props["storedProcedureParameters"].items()}
+        )
+        return {}
 
 
 def test_assets_match_generator_and_use_sequential_deployment_contract():
@@ -182,16 +94,14 @@ def test_assets_match_generator_and_use_sequential_deployment_contract():
         settings = read("pipeline_settings", name)
         assert settings["concurrency"] == 1
         assert all(isinstance(value, str) for value in settings["parameters"].values())
-    for kind in ("parquet", "binary"):
-        assert (
-            read("datasets", f"ds_retail_cdc_{kind}")["properties"]["typeProperties"]["location"]["fileSystem"]
-            == "landing"
-        )
+    props = read("datasets", "ds_retail_cdc_parquet")["properties"]["typeProperties"]
+    assert props["location"]["fileSystem"] == "landing"
+    assert not (ADF / "datasets/ds_retail_cdc_binary.json").exists()
 
 
 @pytest.mark.parametrize("mode", ["snapshot", "window"])
-def test_lookup_select_publish_cleanup_and_watermark_for_both_tables(mode):
-    run = RetailRun(mode)
+def test_lookup_select_publish_cleanup_and_watermark_for_both_tables(tmp_path, mode):
+    run = RetailRun(tmp_path, mode)
     run.run()
     suffix = f"snapshot={TO}" if mode == "snapshot" else f"window={FROM}_{TO}"
     assert run.stage == set()
@@ -218,8 +128,8 @@ def test_lookup_select_publish_cleanup_and_watermark_for_both_tables(mode):
     assert run.calls.index("delete_staged_parquet") < run.calls.index(f"set_watermark_{mode}")
 
 
-def test_empty_mode_logs_without_any_storage_activity_or_from_lsn():
-    run = RetailRun("empty", rows=0)
+def test_empty_mode_logs_without_any_storage_activity_or_from_lsn(tmp_path):
+    run = RetailRun(tmp_path, "empty", rows=0)
     run.run()
     assert run.stage == run.landing == set()
     assert len(run.commits) == 2
@@ -228,20 +138,19 @@ def test_empty_mode_logs_without_any_storage_activity_or_from_lsn():
 
 
 @pytest.mark.parametrize("creates_file", [True, False])
-def test_zero_row_window_advances_without_a_landing_file(creates_file):
-    run = RetailRun(rows=0, creates_file=creates_file)
+def test_zero_row_window_advances_without_a_landing_file(tmp_path, creates_file):
+    run = RetailRun(tmp_path, rows=0, creates_file=creates_file)
     run.run()
     assert run.stage == run.landing == set()
     assert len(run.commits) == 2 and all(c["rows"] == 0 and c["from_lsn"] == FROM for c in run.commits)
 
 
 @pytest.mark.parametrize("failure", ["copy_window", "publish_parquet", "delete_staged_parquet", "set_watermark_window"])
-def test_failed_stage_does_not_commit_and_replay_uses_same_paths(failure):
-    run = RetailRun(failure=failure)
+def test_failed_stage_does_not_commit_and_replay_uses_same_paths(tmp_path, failure):
+    run = RetailRun(tmp_path, failure=failure)
     with pytest.raises(RuntimeError, match=failure):
         run.run()
     assert run.commits == []
-    run.failure = None
     run.run()
     assert len(run.landing) == len(run.commits) == 2 and not run.stage
     assert all(c["from_lsn"] == FROM and c["to_lsn"] == TO for c in run.commits)
@@ -250,25 +159,27 @@ def test_failed_stage_does_not_commit_and_replay_uses_same_paths(failure):
 @pytest.mark.parametrize(
     ("options", "error", "message"),
     [
-        ({"read_rows": 3}, RuntimeError, "bad_publish_input"),
+        ({"read_rows": 3}, RuntimeError, "RetailCdcContract"),
         ({"missing_stats": True}, KeyError, "rowsCopied"),
-        ({"creates_file": False}, RuntimeError, "missing_published_file"),
-        ({"mode": "unsupported"}, RuntimeError, "invalid_window_mode"),
+        ({"creates_file": False}, RuntimeError, "RetailCdcContract"),
+        ({"mode": "unsupported"}, RuntimeError, "RetailCdcContract"),
     ],
 )
-def test_invalid_copy_and_lookup_results_never_publish_or_advance(options, error, message):
-    run = RetailRun(**options)
+def test_invalid_copy_and_lookup_results_never_publish_or_advance(tmp_path, options, error, message):
+    run = RetailRun(tmp_path, **options)
     with pytest.raises(error, match=message):
         run.run()
     assert not run.commits and not run.landing
 
 
-def test_publish_retry_after_delete_uses_existing_final_file_without_copy():
-    run = RetailRun()
+def test_publish_retry_after_delete_uses_existing_final_file_without_copy(tmp_path):
+    run = RetailRun(tmp_path)
     params = {"ci": "dbo_promotions", "slice": f"window={FROM}_{TO}", "rows_read": "2", "rows_copied": "2"}
-    run.landing.add(f"retail_db/promotions/{params['slice']}/part-00000.parquet")
-    run.run("pl_cdc_publish_slice", params)
+    published = tmp_path / f"landing/retail_db/promotions/{params['slice']}/part-00000.parquet"
+    published.parent.mkdir(parents=True)
+    published.write_bytes(b"PAR1")
+    run.run("pl_cdc_publish_slice", **params)
     assert "publish_parquet" not in run.calls and "delete_staged_parquet" not in run.calls
     params["slice"] = "snapshot=0x" + "../" + "A" * 17
-    with pytest.raises(RuntimeError, match="bad_publish_input"):
-        run.run("pl_cdc_publish_slice", params)
+    with pytest.raises(RuntimeError, match="RetailCdcContract"):
+        run.run("pl_cdc_publish_slice", **params)

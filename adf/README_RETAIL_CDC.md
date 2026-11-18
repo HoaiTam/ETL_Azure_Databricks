@@ -1,21 +1,19 @@
 # ADF · CDC retail theo LSN (AD-DE-07)
 
 [DE/01 §3.5–3.6](../docs/de/01_ingest_landing.md) mô tả hợp đồng dữ liệu và cách phục hồi.
-Các JSON được dựng theo API và kiểm model Azure SDK. Debug, publish và chạy nghiệm thu Azure còn chờ #41 và #27.
+Các JSON được dựng theo API và kiểm bằng model Azure SDK.
 
 ## Bàn giao cho P1
 
-1. Tạo `ls_sql_retail` cho `retail_db` và `ls_adls` dùng managed identity ở #27. Danh tính SQL cần
-   `SELECT` trên các cột capture của hai bảng, quyền đọc CDC theo capture instance và `EXECUTE` trên
-   `etl.usp_get_cdc_window`, `etl.usp_set_cdc_watermark`. ADLS cần đọc, ghi và xóa file staging theo thiết kế.
-   Cấu hình linked service và bí mật thuộc stack hạ tầng.
-2. Tạo ba dataset trong `datasets/ds_retail_cdc_*.json`. Dataset SQL dùng truy vấn và procedure từ
-   activity. Hai dataset ADLS dùng container `landing`, tham số `folder_path` và `file_name` kiểu String.
-3. Nạp các pipeline theo thứ tự `pl_cdc_publish_slice`, `pl_cdc_one_table`, `pl_ingest_retail_db`.
-   Truyền mảng `pipelines/<tên>.json` vào `activities_json`, lấy tham số và `concurrency = 1` trong
-   `pipeline_settings/<tên>.json`. Pipeline phụ thuộc dataset, linked service và pipeline con được gọi.
-4. Publish qua `40-orchestration`. Chỉ khởi chạy `pl_ingest_retail_db` từ ADF Monitor hoặc `pl_master`
-   khi nguồn ở trạng thái sẵn sàng. Hai pipeline con nhận đầu vào nội bộ từ lượt ingest.
+Linked service `ls_sql_retail` và `ls_adls` đã có. Khi merge, workflow `tf-apply` của stack
+`40-orchestration` tự publish hai dataset SQL/Parquet và ba pipeline vào ADF sau bước duyệt của P1.
+Publish dùng lại `ds_instacart_adls_binary` với `file_system=landing`.
+
+Trước merge, P1 chạy plan chỉ đọc trên nhánh PR. Kỳ vọng chỉ tạo
+`dataset["ds_retail_cdc_sql"]`, `dataset["ds_retail_cdc_parquet"]`,
+`pipeline_tier0["pl_cdc_publish_slice"]`, `pipeline_tier1["pl_cdc_one_table"]` và
+`pipeline_tier2["pl_ingest_retail_db"]`. Dán tóm tắt plan lên PR. Sau publish, chạy
+`pl_ingest_retail_db` từ Monitor khi nguồn và CDC đã sẵn sàng.
 
 ## Hợp đồng lúc chạy
 
@@ -30,8 +28,8 @@ Các JSON được dựng theo API và kiểm model Azure SDK. Debug, publish v�
 - Copy ghi một `part-00000.parquet` vào `_staging/retail_db/<bảng>/<phân đoạn>/`. Phân đoạn là
   `snapshot=<to_lsn>` hoặc `window=<from_lsn>_<to_lsn>`, giữ nguyên giá trị hex 22 ký tự.
 - Publisher kiểm `rowsRead = rowsCopied`. Có dòng thì Binary Copy sang `retail_db/<bảng>/<phân đoạn>/`
-  với kiểm toàn vẹn dữ liệu, xác nhận file và xóa đúng file staging. Không có dòng thì dọn file staging
-  nếu connector đã tạo file rỗng, không công bố file. CDC dùng max LSN toàn database nên một bảng có
+  với kiểm toàn vẹn dữ liệu, xác nhận file và xóa thư mục staging của đúng slice. Không có dòng thì
+  dọn thư mục staging nếu connector đã tạo, không công bố file. CDC dùng max LSN toàn database nên một bảng có
   thể có cửa sổ hợp lệ với `rows = 0`.
 - Setter chỉ chạy khi publisher thành công. `from_lsn` chỉ có ở `window`. `snapshot` và `empty` bỏ
   hẳn tham số để dùng default NULL. Bảng `etl.run_log` dùng cặp ID lượt ingest và capture instance.
@@ -44,8 +42,8 @@ Các JSON được dựng theo API và kiểm model Azure SDK. Debug, publish v�
    Chạy pipeline cha, ghi ID của cha/con, 2 dòng `snapshot` trong `etl.run_log`, số hàng và 2 file landing.
 2. Chạy wave 1, đợi capture. Chạy pipeline lần nữa. Xác nhận 2 log `window` có số dòng dương và Parquet
    `promotions` có cả `_op = 1` và `_op = 4`. Ghi phạm vi LSN và đối chiếu payload với nguồn.
-3. Chạy lại khi max LSN ổn định, không seed. Xác nhận 2 dòng `empty`, mốc giữ nguyên, không có file
-   landing mới hoặc thao tác Copy/Delete.
+3. Chạy lại khi không seed. Chấp nhận mỗi bảng trả `empty` hoặc `window` với `rows_copied = 0`
+   nếu max LSN toàn database đã tiến. Cả hai trường hợp đều không được tạo thư mục landing mới.
 4. Trên môi trường debug riêng, gây lỗi Copy hoặc Binary publish sau Lookup. Ghi watermark trước/sau
    lỗi của đúng bảng. Sửa lỗi và dùng **Rerun from failed activity** trên run tương ứng của pipeline con
    với kết quả Lookup và tham số `parent_run_id` cũ. Đối soát số dòng, tên phân đoạn và watermark sau retry.

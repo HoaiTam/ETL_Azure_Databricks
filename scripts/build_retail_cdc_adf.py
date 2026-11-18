@@ -241,8 +241,16 @@ def publish_slice():
     )
     counts_valid = f"and(greaterOrEquals(int({READ}), 0), equals(int({READ}), int({COPIED})))"
     positive = f"greater(int({COPIED}), 0)"
-    staged = file_ref("ds_retail_cdc_binary", folder(SLICE, staging=True))
-    landing = file_ref("ds_retail_cdc_binary", folder(SLICE))
+    stage_path = folder(SLICE, staging=True)
+    staged = dataset_ref(
+        "ds_instacart_adls_binary", file_system="landing", folder_path=expr(stage_path), file_name=FILE
+    )
+    landing = dataset_ref(
+        "ds_instacart_adls_binary", file_system="landing", folder_path=expr(folder(SLICE)), file_name=FILE
+    )
+    stage_folder = dataset_ref(
+        "ds_instacart_adls_binary", file_system="landing", folder_path=expr(stage_path), file_name=""
+    )
     stage_exists = "activity('get_staged_file').output.exists"
     return [
         condition(
@@ -282,18 +290,19 @@ def publish_slice():
             [fail("missing_published_file", "Copy có dòng nhưng không tìm thấy Parquet ở landing.")],
             after="get_published_file",
         ),
+        metadata("get_staged_slice", stage_folder, "require_published_file"),
         condition(
-            "clean_staged_file",
-            stage_exists,
+            "clean_staged_slice",
+            "activity('get_staged_slice').output.exists",
             [
                 activity(
                     "delete_staged_parquet",
                     "Delete",
-                    {"dataset": staged, "storeSettings": {"type": "AzureBlobFSReadSettings", "recursive": False}},
+                    {"dataset": stage_folder, "storeSettings": {"type": "AzureBlobFSReadSettings", "recursive": True}},
                     retry=0,
                 )
             ],
-            after="require_published_file",
+            after="get_staged_slice",
         ),
     ]
 
@@ -322,25 +331,23 @@ def pipeline_definitions():
 
 
 def dataset_definitions():
-    datasets = {"ds_retail_cdc_sql": {"type": "AzureSqlTable", "linkedServiceName": link("ls_sql_retail")}}
-    for kind in ("Parquet", "Binary"):
-        props = {
-            "location": {
-                "type": "AzureBlobFSLocation",
-                "fileSystem": "landing",
-                "folderPath": expr("dataset().folder_path"),
-                "fileName": expr("dataset().file_name"),
-            }
-        }
-        if kind == "Parquet":
-            props["compressionCodec"] = "snappy"
-        datasets[f"ds_retail_cdc_{kind.lower()}"] = {
-            "type": kind,
+    return {
+        "ds_retail_cdc_sql": {"type": "AzureSqlTable", "linkedServiceName": link("ls_sql_retail")},
+        "ds_retail_cdc_parquet": {
+            "type": "Parquet",
             "linkedServiceName": link("ls_adls"),
             "parameters": {name: {"type": "String"} for name in ("folder_path", "file_name")},
-            "typeProperties": props,
-        }
-    return datasets
+            "typeProperties": {
+                "location": {
+                    "type": "AzureBlobFSLocation",
+                    "fileSystem": "landing",
+                    "folderPath": expr("dataset().folder_path"),
+                    "fileName": expr("dataset().file_name"),
+                },
+                "compressionCodec": "snappy",
+            },
+        },
+    }
 
 
 def definition(name, activities, params):
