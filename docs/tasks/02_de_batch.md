@@ -229,9 +229,9 @@ CDC theo LSN cần bảng nguồn, CDC bật trên 2 bảng, watermark và nhậ
 
 **Xong khi**
 
-- [ ] cdc.change_tables có dbo_product_prices và dbo_promotions
-- [ ] EXEC etl.usp_get_cdc_window trả mode = snapshot cho cả 2 capture instance
-- [ ] Script chạy lại lần hai không lỗi
+- [x] cdc.change_tables có dbo_product_prices và dbo_promotions
+- [x] EXEC etl.usp_get_cdc_window trả mode = snapshot cho cả 2 capture instance
+- [x] Script chạy lại lần hai không lỗi
 
 **Kết quả chuẩn bị AD-DE-04 (2026-11-17)**
 
@@ -248,13 +248,11 @@ CDC theo LSN cần bảng nguồn, CDC bật trên 2 bảng, watermark và nhậ
   workflow `retail-sql-checks` chạy cùng regression khi PR sửa SQL/fixture/runner.
 - `uv sync --frozen`, `ruff check .`, `ruff format --check .` và toàn bộ **97 test Python** đều đạt
   sau khi rebase lên main đã tích hợp AD-DE-02/03 (#137/#138); diff chỉ còn AD-DE-04.
-- **Cập nhật 2026-11-18:** AD-OPS-12 (#14) và AD-OPS-06 (#8) đã đóng. Phiên P2 đã đăng nhập Azure,
-  đọc được control plane và xác nhận `retail_db` Online, free limit bật, chế độ hết free limit là AutoPause.
-  Kết nối Entra SQL bị firewall từ chối; chưa kiểm quyền `db_owner`, chưa chạy DDL hoặc nghiệm thu ba tiêu chí trên.
-- PR được rebase lên main sau #173; kiểm lại **97 test Python**, Ruff/format và regression SQL local đều đạt.
-  Hướng dẫn kết nối đã chọn rõ `ActiveDirectoryAzCli`, thêm preflight chỉ đọc và cách xử lý firewall/quyền.
-  Cần P1 cấp IP qua cấu hình Terraform/workflow rồi kiểm quyền SQL; giữ PR draft và ba tiêu chí chưa tick.
-  Chưa triển khai seed/ADF (AD-DE-05/07), không tạo hay sửa tài nguyên cloud.
+- **Nghiệm thu Azure 2026-11-18 (P1, admin Entra, `db_owner`):** `retail_db` ban đầu trắng.
+  Chạy `01` → `02` → `03` hai lần, cả hai lần đều thoát mã 0. `is_cdc_enabled = 1`; `cdc.change_tables` có
+  `dbo_product_prices`, `dbo_promotions`; `sp_cdc_help_jobs` cho cleanup retention 10.080 phút.
+  `usp_get_cdc_window` trả `snapshot` cho cả hai capture instance; watermark còn NULL, `etl.run_log` trống.
+  Ba tiêu chí trên đạt. Chưa triển khai seed/ADF (AD-DE-05/07).
 
 ### AD-DE-05
 

@@ -158,14 +158,12 @@ SQL Server image là amd64; máy Apple Silicon cần giả lập Docker (đã ki
 - Workflow `retail-sql-checks` chạy cùng lệnh khi PR sửa SQL, fixture hoặc runner/workflow.
   Local tắt SQL Agent và gọi scan thủ công để test tất định; Azure SQL có scheduler riêng.
 
-## Nghiệm thu Azure còn chờ
+## Nghiệm thu Azure
 
-#14 và #8 đã đóng. Lần kiểm 2026-11-18 đọc được control plane và xác nhận database Online,
-nhưng kết nối Entra SQL từ phiên P2 bị firewall từ chối; chưa kiểm được quyền SQL và chưa chạy DDL.
-P1 cần cấp đường truy cập cho thành viên trước khi nghiệm thu; không dùng trạng thái issue đã đóng
-hoặc kết quả regression local làm bằng chứng đã cài đặt trên database chính thức.
+Đã nghiệm thu nhánh CDC trên `retail_db` ngày 2026-11-18 bằng admin Entra (kết quả ở `docs/tasks/02_de_batch.md`, AD-DE-04).
+Nếu dựng lại database, làm lại các bước dưới đây.
 
-Sau khi kết nối và quyền đạt, chạy nhánh CDC đã đạt spike #8/#141 bằng admin Entra rồi chạy lại lần hai.
+Sau khi kết nối và quyền đạt (preflight ở trên), chạy nhánh CDC đã đạt spike #8/#141 bằng admin Entra rồi chạy lại lần hai.
 Trước lần ADF đầu, kiểm nguồn/mốc chưa có dữ liệu cũ; nếu mốc đã tồn tại, không tự reset để ép snapshot.
 Với CDC, lưu kết quả `is_cdc_enabled`, hai dòng `cdc.change_tables`, retention từ `sys.sp_cdc_help_jobs`
 và hai lệnh Lookup trả `snapshot` (chờ scheduler sẵn sàng rồi thử lại nếu LSN chưa sẵn sàng).
