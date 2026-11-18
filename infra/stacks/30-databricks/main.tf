@@ -37,7 +37,7 @@ data "terraform_remote_state" "bootstrap" {
 locals {
   core = data.terraform_remote_state.core.outputs
 
-  # Mọi người có ít nhất một vai trong var.roles (key của member_emails, ví dụ "p2").
+  # Mọi người có ít nhất một vai trong var.roles (key của member_upns, ví dụ "p2").
   members = toset(flatten(values(var.roles)))
 }
 
@@ -68,8 +68,11 @@ resource "databricks_service_principal" "ci" {
 
   # Đây là chính danh tính đang chạy apply và là run_as của job prod. Hủy stack (AD-OPS-34) thì
   # gỡ dòng này trước, và hủy bundle prod trước 30-databricks.
+  # display_name: SP này do Databricks tự thêm từ Entra (Source = External), workspace giữ tên
+  # "Unnamed service principal" và không nhận tên mới, nên bỏ qua để plan về No changes.
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = [display_name]
   }
 }
 
@@ -90,7 +93,7 @@ resource "databricks_service_principal" "func" {
 resource "databricks_user" "members" {
   for_each = local.members
 
-  user_name             = var.member_emails[each.key]
+  user_name             = var.member_upns[each.key]
   workspace_access      = true
   databricks_sql_access = true
   allow_cluster_create  = false
