@@ -50,6 +50,18 @@
   Ví dụ dùng trên pipeline nằm ở `docs/de/03` §4 và `docs/de/04` §4.1.
 - Kiểm tra: `uv run pytest tests/test_dq.py -q`.
 
+## Azure SQL nguồn (AD-DE-04)
+
+- Schema/CDC và procedure điều khiển ở `ingest/sql/`; đọc `ingest/sql/README.md` trước khi chạy.
+- Chọn CDC (01 → 02 → 03) hoặc timestamp + soft delete (01 → 04) theo spike; không trộn hai nhánh.
+  Không tự disable CDC, reset watermark hoặc đổi tier để vượt giới hạn free offer.
+- Setter watermark chỉ gọi sau khi công bố landing thành công. Retry cùng run ID/nội dung không nhân log;
+  run cũ hoặc bỏ khoảng mốc phải bị từ chối. Seed và ADF không chạy đồng thời.
+- Nguồn dùng `updated_at` theo lịch giả lập; nhánh dự phòng lấy `MAX(updated_at)` làm mốc, không dùng giờ máy.
+  Seed phải ghi danh sách cột INSERT tường minh và soft delete khi chọn dự phòng.
+- Kiểm tích hợp SQL: `python3 scripts/check_retail_sql.py` (cần Docker), tách khỏi pytest/Spark.
+  Chỉ dùng database/container tạm; nghiệm thu Azure bằng admin Entra chờ AD-OPS-12 và AD-OPS-06.
+
 ## Dữ liệu mẫu cho phát triển local
 
 - Fixture nhỏ tự dựng ở `tests/fixtures/instacart/`, gồm đủ sáu CSV; không phải dữ liệu thật.
