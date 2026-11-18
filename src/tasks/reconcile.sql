@@ -22,7 +22,7 @@ MERGE INTO reconciliation t
 USING (
   WITH e AS (
     SELECT map_from_entries(collect_list(named_struct('key', metric, 'value', expected))) AS counts
-   
+
       FROM expected_counts
       WHERE profile = :profile
   ),
