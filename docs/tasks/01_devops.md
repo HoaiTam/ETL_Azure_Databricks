@@ -27,8 +27,9 @@
 | [AD-OPS-19](#ad-ops-19) | Tạo storage credential, external location, catalog instacart, 8 schema và volume (30-databricks bước 3–4) | P1 | G1 | Bắt đầu: AD-OPS-10, AD-OPS-11 | [#21](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/21) |
 | [AD-OPS-20](#ad-ops-20) | Cấp quyền Unity Catalog theo vai trò (30-databricks bước 5) | P1 | G1 | Bắt đầu: AD-OPS-18, AD-OPS-19 | [#22](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/22) |
 | [AD-OPS-21](#ad-ops-21) | Tạo cluster policy single-node, pipeline và ds-benchmark, chặn tạo cluster tự do (30-databricks bước 6) | P1 | G1 | Bắt đầu: AD-OPS-18 | [#23](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/23) |
+| [AD-OPS-21b](#ad-ops-21b) | Chặn cluster không tự tắt và gắn policy cho cluster bảo trì của pipeline | P1 | G1 | Bắt đầu: AD-OPS-21; Hoàn tất: AD-DE-08 | [#180](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/180) |
 | [AD-OPS-22](#ad-ops-22) | Tạo secret scope Key Vault, serverless SQL warehouse và output cho DAB, Power BI (30-databricks bước 7–9) | P1 | G1 | Bắt đầu: AD-OPS-18; Hoàn tất: AD-OPS-12 | [#24](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/24) |
-| [AD-OPS-23](#ad-ops-23) | Nghiệm thu G1: chạy 30-databricks qua CI và thử de-deploy dev/prod | P1 | G1 | Bắt đầu: AD-OPS-17, AD-OPS-20, AD-OPS-21, AD-OPS-22; Hoàn tất: AD-DE-18 | [#25](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/25) |
+| [AD-OPS-23](#ad-ops-23) | Nghiệm thu G1: chạy 30-databricks qua CI và thử de-deploy dev/prod | P1 | G1 | Bắt đầu: AD-OPS-17, AD-OPS-20, AD-OPS-21, AD-OPS-22; Hoàn tất: AD-DE-18, AD-OPS-21b | [#25](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/25) |
 | [AD-OPS-24](#ad-ops-24) | Dựng stack 20-stream (Event Hubs, SAS, secret) và nghiệm thu stream-toggle | P3 | G2 | Bắt đầu: AD-OPS-02, AD-OPS-10; Hoàn tất: AD-OPS-03b | [#26](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/26) |
 | [AD-OPS-25](#ad-ops-25) | Khai báo linked service và dataset ADF trong stack 40-orchestration | P1 | G3 | Bắt đầu: AD-OPS-12, AD-OPS-13; Hoàn tất: AD-OPS-17 | [#27](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/27) |
 | [AD-OPS-26](#ad-ops-26) | Đưa pipeline và trigger ADF vào 40-orchestration, bật lịch hằng ngày khi pl_master đạt | P1 | G3 | Bắt đầu: AD-OPS-23, AD-OPS-25; Hoàn tất: AD-DE-06, AD-DE-07, AD-DE-19, AD-DE-18 | [#28](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/28) |
@@ -503,6 +504,7 @@ retail_db là nguồn CDC cho product_prices và promotions. Mật khẩu chỉ 
 4. azurerm_key_vault_secret sql-admin-password
 5. Thêm Entra admin cho server (không bật azuread_authentication_only) để thành viên đăng nhập tay bằng Entra; chốt G0: SQL auth + Entra admin
 6. Thêm output sql_server_fqdn; đánh dấu [x] 3.6
+7. Tạo user Entra cho P2 trong retail_db (`CREATE USER [<upn>] FROM EXTERNAL PROVIDER`, role db_owner) theo 03 §3.6; UPN dạng `@ms.uit.edu.vn`, không phải mail `@gm`
 
 **Đầu ra**
 
@@ -512,6 +514,7 @@ retail_db là nguồn CDC cho product_prices và promotions. Mật khẩu chỉ 
 **Xong khi**
 
 - [ ] sqlcmd hoặc Azure Data Studio kết nối retail_db từ IP thành viên
+- [ ] P2 đăng nhập retail_db bằng Entra và `IS_MEMBER('db_owner')` trả 1
 - [ ] Portal hiện free offer đang áp dụng
 - [ ] Plan lần hai No changes
 
@@ -728,7 +731,7 @@ Catalog và volume raw là điều kiện của G1: Auto Loader đọc /Volumes/
 
 1. databricks_storage_credential cred-instacart-lake từ Access Connector
 2. 7 external location el-<container>
-3. Catalog instacart; 8 schema landing_meta, bronze, silver, gold, ml, ds_data, instacart_sandbox, ops với storage_root riêng
+3. Catalog instacart; 8 schema landing_meta, bronze, silver, gold, ml, ds_data, instacart_sandbox, ops với storage_root riêng (landing_meta đặt ở bronze/landing_meta vì volume raw chiếm cả container landing)
 4. Volume raw, checkpoints, ds_data.exports, ml.inbox; kiểm đường dẫn không chồng storage_root
 5. Nếu spike không cho tạo storage credential: đi nhánh managed storage và ghi lại
 6. Đánh dấu [x] bước 3, 4
@@ -772,7 +775,7 @@ Rubric 4 yêu cầu ràng buộc ai xem dữ liệu nào ở tầng dữ liệu.
 **Xong khi**
 
 - [ ] P2 (de) tạo được bảng trong bronze
-- [ ] P3 (bi) đọc bronze bị PERMISSION_DENIED, đọc gold được
+- [ ] P4 (ds + bi, không thuộc de) đọc bronze bị PERMISSION_DENIED, đọc gold được (không thử bằng P3 vì P3 thuộc de)
 - [ ] DS đọc được ds_data, ghi được ml
 - [ ] Plan lần hai No changes
 
@@ -786,7 +789,7 @@ Rubric 4 yêu cầu ràng buộc ai xem dữ liệu nào ở tầng dữ liệu.
 - Tài liệu: `docs/devops/05_databricks_platform.md §3 bước 6`, `docs/de/02_bronze_ldp.md §2.1`
 - **Bắt đầu sau:** [AD-OPS-18](01_devops.md#ad-ops-18) [#20](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/20)
 - **Hoàn tất còn cần:** Không có.
-- **Mở khóa:** [AD-OPS-23](01_devops.md#ad-ops-23) (bắt đầu), [AD-OPS-30](01_devops.md#ad-ops-30) (bắt đầu), [AD-DE-08](02_de_batch.md#ad-de-08) (hoàn tất), [AD-ST-03](03_de_stream.md#ad-st-03) (hoàn tất)
+- **Mở khóa:** [AD-OPS-21b](01_devops.md#ad-ops-21b) (bắt đầu), [AD-OPS-23](01_devops.md#ad-ops-23) (bắt đầu), [AD-OPS-30](01_devops.md#ad-ops-30) (bắt đầu), [AD-DE-08](02_de_batch.md#ad-de-08) (hoàn tất), [AD-ST-03](03_de_stream.md#ad-st-03) (hoàn tất)
 
 Quota 4 vCPU buộc cưỡng chế single-node và tự tắt; policy cố định giúp benchmark rubric 3.1 lặp lại được. Bundle tra policy theo tên.
 
@@ -796,7 +799,7 @@ Quota 4 vCPU buộc cưỡng chế single-node và tự tắt; policy cố đị
 2. Policy loại dlt instacart-pipeline-single-node theo de/02 §2.1
 3. Policy instacart-ds-benchmark cho chọn local[1]/[2]/[4]/[*]
 4. databricks_permissions CAN_USE cho thành viên và SP CI (ds-benchmark: vai ds + SP CI)
-5. databricks_entitlements tắt allow_cluster_create của nhóm users
+5. Bảo đảm không ai không phải admin có allow_cluster_create: principal của bước 2 đặt false; nhóm users không sửa được bằng API (workspace từ chối) và vốn không có entitlement
 6. Đánh dấu [x] bước 6
 
 **Đầu ra**
@@ -808,6 +811,36 @@ Quota 4 vCPU buộc cưỡng chế single-node và tự tắt; policy cố đị
 - [ ] Thành viên không tạo được cluster ngoài policy
 - [ ] Cluster theo policy tự tắt sau tối đa 20 phút
 - [ ] Cluster theo instacart-ds-benchmark với local[2] trả sc.defaultParallelism = 2
+
+### AD-OPS-21b
+
+**Chặn cluster không tự tắt và gắn policy cho cluster bảo trì của pipeline**
+
+- Vai dự kiến: **P1 · DevOps** (phần 2 cần P2 thử trên pipeline dev)
+- Cổng: **G1**
+- Issue: [#180](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/180)
+- Tài liệu: `docs/devops/05_databricks_platform.md §3 bước 6`, `docs/de/02_bronze_ldp.md §2.1`
+- **Bắt đầu sau:** [AD-OPS-21](01_devops.md#ad-ops-21) [#23](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/23)
+- **Hoàn tất còn cần:** [AD-DE-08](02_de_batch.md#ad-de-08) [#44](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/44)
+- **Mở khóa:** [AD-OPS-23](01_devops.md#ad-ops-23) (hoàn tất)
+
+Tách từ AD-OPS-21: ba policy đã apply, còn hai lỗ hổng phải thử trên cluster thật mới sửa được. Phần 1 làm được ngay khi quota 4 vCPU rảnh; phần 2 chờ pipeline `instacart_batch` có trên dev.
+
+**Việc cần làm**
+
+1. Phần 1, cluster không tự tắt: `autotermination_minutes` chỉ có `maxValue`, nên cluster tạo qua API với giá trị 0 chạy mãi. Thử trên policy tạm (tạo bằng CLI, xóa sau khi thử) có `minValue = 10`, chạy một job one-time (`databricks jobs submit`) không khai `autotermination_minutes`
+2. Job chạy được thì thêm `minValue = 10` vào `local.single_node_policy`; bị từ chối thì tách policy cluster tương tác (`cluster_type` fixed `all-purpose`, tự tắt 10–20) và policy job (`cluster_type` fixed `job`, bỏ autotermination), sửa `bundles/` và 05 bước 6 theo tên mới
+3. Phần 2, cluster bảo trì: sau khi pipeline dev chạy xong một update (AD-DE-08), xem cluster `maintenance` có lên trên `Standard_D4ds_v4` không
+4. Nếu lỗi hoặc sai máy: thêm mục `label: maintenance` (cùng `policy_id`, `spark_conf`, `custom_tags`) vào `bundles/resources/pipeline_*.yml` và mẫu ở de/02, de/04; policy từ chối thì sửa policy `dlt`; ghi kết quả vào de/02 §2.1
+
+**Đầu ra**
+
+- PR sửa policy ở `30-databricks` (và bundle nếu cần)
+
+**Xong khi**
+
+- [ ] Tạo cluster với `autotermination_minutes = 0` bị policy từ chối, job cluster vẫn chạy được
+- [ ] Cluster bảo trì của pipeline dev chạy trên `Standard_D4ds_v4`, có tag `owner`
 
 ### AD-OPS-22
 
@@ -852,7 +885,7 @@ Notebook đọc bí mật qua scope kv; Power BI cần host và HTTP path của 
 - Issue: [#25](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/25)
 - Tài liệu: `docs/devops/05_databricks_platform.md §5`, `docs/devops/04_github_actions_cicd.md §3.4`, `docs/devops/04_github_actions_cicd.md §5`
 - **Bắt đầu sau:** [AD-OPS-17](01_devops.md#ad-ops-17) [#19](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/19), [AD-OPS-20](01_devops.md#ad-ops-20) [#22](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/22), [AD-OPS-21](01_devops.md#ad-ops-21) [#23](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/23), [AD-OPS-22](01_devops.md#ad-ops-22) [#24](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/24)
-- **Hoàn tất còn cần:** [AD-DE-18](02_de_batch.md#ad-de-18) [#54](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/54)
+- **Hoàn tất còn cần:** [AD-DE-18](02_de_batch.md#ad-de-18) [#54](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/54), [AD-OPS-21b](01_devops.md#ad-ops-21b) [#180](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/180)
 - **Mở khóa:** [AD-OPS-26](01_devops.md#ad-ops-26) (bắt đầu), [AD-OPS-27](01_devops.md#ad-ops-27) (bắt đầu), [AD-OPS-31](01_devops.md#ad-ops-31) (bắt đầu), [AD-DE-19](02_de_batch.md#ad-de-19) (hoàn tất)
 
 Đạt checklist 05 §5 thì mở G1 để DE chạy ADF → landing → bronze trên cloud. Bundle validate và de-deploy cần workspace thật.
@@ -1214,6 +1247,8 @@ Dừng tiêu credit sau khi nộp. Destroy phải đi ngược thứ tự để 
 1. Xuất bảng gold, ml cần giữ và ảnh bằng chứng trước khi hủy
 2. Tắt trigger ADF, tắt stream-toggle schedule
 3. P1 (và P3, P4 với Sub B, C) hủy theo thứ tự 50-serving → 90-sandbox → 40 → 20 → 30 → 10 bằng tay hoặc workflow có duyệt
+   - Trước khi hủy 30-databricks: một PR gỡ `prevent_destroy` của SP CI và bật `force_destroy = true` cho catalog `instacart` cùng các schema (còn bảng tạo ngoài Terraform như `landing_meta.off_crawl_state` thì xóa schema lỗi). Hủy bundle prod trước.
+   - Trước khi hủy 10-core: `databricks catalogs get instacart` phải báo không tồn tại. Metastore dùng chung cả tenant, nên catalog, external location, storage credential còn sót sẽ thành đồ mồ côi mà chỉ SP CI dọn được.
 4. Giữ bootstrap đến khi xác nhận không còn tài nguyên, rồi gỡ lock và hủy
 5. Ghi chi phí cuối cùng vào bảng chi phí
 

@@ -2,7 +2,7 @@
 
 **Đầu vào:**
 - Stack `10-core` và `40-orchestration` đã apply: ADF, linked service `ls_adls`, `ls_sql_retail`, `ls_zenodo`, `ls_kv` ([devops/06 §1](../devops/06_de_den_dashboard.md)).
-- Azure SQL `retail_db` đã có. Tài khoản admin Entra của server dùng để bật CDC.
+- Azure SQL `retail_db` đã có. Người bật CDC cần role `db_owner` trong DB: admin Entra (P1), hoặc user Entra của P2 do P1 tạo ([devops/03 §3.6](../devops/03_terraform_azure.md)).
 - Quy ước đường dẫn ở [00 §3](00_tong_quan_de.md).
 
 **Đầu ra:**
@@ -109,8 +109,8 @@ CREATE TABLE dbo.promotions (
 
 ### 3.3 Bật CDC và tạo bảng điều khiển
 
-Chạy bằng tài khoản admin Entra của server sau khi AD-OPS-12 cấp `retail_db` và AD-OPS-06
-chốt nhánh CDC. Azure SQL Database có scheduler CDC riêng, **không cần SQL Agent**.
+Chạy bằng tài khoản có `db_owner` trong `retail_db` (admin Entra hoặc user Entra của P2) sau khi AD-OPS-12 cấp `retail_db`
+và AD-OPS-06 chốt nhánh CDC. Azure SQL Database có scheduler CDC riêng, **không cần SQL Agent**.
 Script thực thi và cách chạy ở [src/ingest/sql/README.md](../../src/ingest/sql/README.md):
 
 1. `01_schema.sql`: tạo `product_prices`, `promotions` nếu chưa có, giữ nguyên dữ liệu cũ.

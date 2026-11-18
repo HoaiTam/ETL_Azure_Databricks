@@ -131,7 +131,7 @@ resource "databricks_storage_credential" "lake" {
 resource "databricks_external_location" "layer" {
   for_each        = toset(["landing", "bronze", "silver", "gold", "checkpoints", "mlflow", "ds-data"])
   name            = "el-${each.key}"
-  url             = "abfss://${each.key}@${local.core.lake_account_name}.dfs.core.windows.net/"
+  url             = "${local.lake_url[each.key]}/"   # lake_url: abfss://<container>@<account>.dfs.core.windows.net
   credential_name = databricks_storage_credential.lake.name
 }
 ```
@@ -151,13 +151,13 @@ resource "databricks_external_location" "layer" {
 ```hcl
 resource "databricks_catalog" "instacart" {
   name         = "instacart"
-  storage_root = databricks_external_location.layer["bronze"].url   # mặc định; schema ghi đè bên dưới
+  storage_root = "${local.lake_url["bronze"]}/_catalog"   # mặc định; schema ghi đè bên dưới
   comment      = "Instacart Market Basket + Open Food Facts + retail_db"
 }
 
 locals {
   schemas = {
-    landing_meta      = "landing"      # volume chứa file thô, bảng off_crawl_state
+    landing_meta      = "bronze"       # bảng off_crawl_state; volume raw chiếm cả container landing
     bronze            = "bronze"
     silver            = "silver"
     gold              = "gold"
@@ -171,7 +171,7 @@ resource "databricks_schema" "s" {
   for_each     = local.schemas
   catalog_name = databricks_catalog.instacart.name
   name         = each.key
-  storage_root = "${databricks_external_location.layer[each.value].url}${each.key}"
+  storage_root = "${local.lake_url[each.value]}/${each.key}"
 }
 
 resource "databricks_volume" "raw" {               # Auto Loader đọc /Volumes/instacart/landing_meta/raw/...
@@ -179,32 +179,37 @@ resource "databricks_volume" "raw" {               # Auto Loader đọc /Volumes
   catalog_name     = databricks_catalog.instacart.name
   schema_name      = databricks_schema.s["landing_meta"].name
   volume_type      = "EXTERNAL"
-  storage_location = databricks_external_location.layer["landing"].url
+  storage_location = "${local.lake_url["landing"]}/"
 }
 resource "databricks_volume" "checkpoints" {        # checkpoint của streaming
   name             = "checkpoints"
   catalog_name     = databricks_catalog.instacart.name
   schema_name      = databricks_schema.s["ops"].name
   volume_type      = "EXTERNAL"
-  storage_location = databricks_external_location.layer["checkpoints"].url
+  storage_location = "${local.lake_url["checkpoints"]}/"
 }
 resource "databricks_volume" "ds_exports" {         # file txt cho Hadoop local (de/08 §5) → blob ds-data/exports/
   name             = "exports"
   catalog_name     = databricks_catalog.instacart.name
   schema_name      = databricks_schema.s["ds_data"].name
   volume_type      = "EXTERNAL"
-  storage_location = "${databricks_external_location.layer["ds-data"].url}exports"
+  storage_location = "${local.lake_url["ds-data"]}/exports"
 }
 resource "databricks_volume" "ml_inbox" {           # kết quả benchmark local upload lên (ds/03 §7) → blob ds-data/inbox/
   name             = "inbox"
   catalog_name     = databricks_catalog.instacart.name
   schema_name      = databricks_schema.s["ml"].name
   volume_type      = "EXTERNAL"
-  storage_location = "${databricks_external_location.layer["ds-data"].url}inbox"
+  storage_location = "${local.lake_url["ds-data"]}/inbox"
 }
 ```
 
 Đường dẫn của hai volume (`ds-data/exports`, `ds-data/inbox`) và `storage_root` của schema `ds_data` (`ds-data/ds_data`) **không chồng nhau**. Unity Catalog từ chối volume ngoài nằm trong vùng lưu trữ của một schema hay bảng.
+
+Unity Catalog cũng từ chối volume ngoài **bao trùm** vùng lưu managed. Vì vậy:
+- Volume `raw` trỏ cả container `landing`, nên `storage_root` của `landing_meta` đặt ở `bronze/landing_meta`, không đặt trong `landing`.
+- `storage_root` của catalog là `bronze/_catalog`, không phải gốc container `bronze`, để không bao lên `bronze/bronze` và `bronze/landing_meta`.
+- Đường dẫn con dựng từ `local.lake_url` cố định, không nối vào `.url` của external location: `.url` trong state là giá trị API trả về, nếu API bỏ `/` cuối thì `storage_root` (ForceNew) đổi và plan đòi thay cả catalog lẫn schema. Vì không còn tham chiếu, catalog, schema, volume khai `depends_on = [databricks_external_location.layer]`.
 
 ### Bước 5 · Phân quyền Unity Catalog (đặc quyền tối thiểu)
 
@@ -244,6 +249,8 @@ resource "databricks_grants" "gold" {
 
 > **Một người có nhiều vai** (ví dụ `p1` thuộc `de` và `ds`, `p4` thuộc `ds` và `bi`): không viết một dynamic block cho mỗi vai, vì cùng một principal sẽ xuất hiện hai lần trong một securable, API trả về một mục đã gộp và plan không bao giờ về *No changes*. Dựng `local` dạng `securable → { key người → hợp privilege của mọi vai người đó có }`, rồi mỗi securable chỉ một dynamic `grant` lặp theo key người, `principal = var.member_upns[grant.key]`.
 
+> Code thật ở `infra/stacks/30-databricks/main.tf` (bước 5): bảng trên viết thành `local.role_privileges` (securable → vai → privilege), `local.grants_by_member` gộp theo người và rút `ALL_PRIVILEGES` thành một mục. Có ba nhóm `databricks_grants`: catalog, mỗi schema (`for_each`), mỗi volume (`for_each`). Volume nằm trong schema mà vai đã có `ALL_PRIVILEGES` thì quyền đã kế thừa, khai lại chỉ để bảng quyền đọc được trong code.
+
 > `databricks_grants` là **có thẩm quyền tuyệt đối**: nó ghi đè mọi grant không khai báo. Vì vậy mọi quyền trên một securable phải nằm trong **một** khối duy nhất.
 
 **Bảo mật mức dòng ngay trong UC (tùy chọn, bổ trợ cho Power BI):** có thể đặt row filter trên `gold.department_sales` theo nhóm, ví dụ hàm `is_account_group_member('bi_produce')` chỉ cho xem department `produce`. Hàm SQL được tạo bằng job DE (DAB), vì hàm là "việc" chứ không phải "nền". Terraform chỉ cấp quyền `EXECUTE`.
@@ -282,7 +289,7 @@ resource "databricks_permissions" "policy_use" {
 }
 ```
 
-Chặn tạo cluster tự do: tắt quyền *Unrestricted cluster creation* của nhóm `users` (`databricks_entitlements`), để mọi người buộc phải dùng policy.
+Chặn tạo cluster tự do: mọi principal do Terraform tạo đặt `allow_cluster_create = false` (bước 2), để ai không phải admin buộc phải dùng policy. Không quản entitlement của nhóm `users`: workspace của dự án từ chối sửa entitlement nhóm `users` và `admins` (lỗi khi apply AD-OPS-21), và nhóm này vốn không có entitlement nào, nên không cấp quyền tạo cluster cho ai.
 
 **Job cluster dùng policy thế nào (kết quả spike 3.4):**
 - Job cluster **không** đặt `apply_policy_default_values: true`. Policy có `autotermination_minutes`, mà job cluster gặp trường này qua giá trị mặc định thì báo "Automated clusters do not support autotermination". Job cluster tự tắt khi job xong, nên không cần trường này.
@@ -314,6 +321,11 @@ resource "databricks_cluster_policy" "ds_benchmark" {
 }
 # databricks_permissions: CAN_USE cho var.roles.ds và SP CI (giống policy_use ở trên)
 ```
+
+**Code thật trong stack** (`infra/stacks/30-databricks/main.tf`, AD-OPS-21) gọn hơn mẫu trên ở mấy chỗ:
+- Phần chung của `instacart-single-node` và `instacart-ds-benchmark` nằm trong `local.single_node_policy`; hai policy chỉ thêm `spark.master` riêng. Máy và runtime nằm ở `local.node_type_id`, `local.spark_version`.
+- Một `databricks_permissions.policy_use` lặp theo 3 policy: `single_node` và `pipeline` cho mọi thành viên, `ds_benchmark` cho vai `ds`; cả ba thêm SP CI. `user_name` lấy từ `databricks_user.members`, giống grant ở bước 5.
+- Cả ba policy cấm `instance_pool_id`. Policy `dlt` cố định thêm `spark.databricks.cluster.profile = singleNode` (spike 3.4 cần profile này), nên pipeline trong bundle phải khai `spark_conf` như mẫu ở de/02 §2.2.
 
 > Instance pool chỉ có lợi khi chạy nhiều job ngắn liên tiếp. Với quota 4 vCPU, VM idle trong pool vẫn **chiếm quota**. Mặc định **không** dùng pool.
 

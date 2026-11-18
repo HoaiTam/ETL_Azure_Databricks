@@ -219,7 +219,7 @@ CDC theo LSN cần bảng nguồn, CDC bật trên 2 bảng, watermark và nhậ
 2. Viết src/ingest/sql/02_enable_cdc.sql (retention 7 ngày)
 3. Viết src/ingest/sql/03_etl_control.sql (etl.cdc_watermark, etl.run_log, usp_get_cdc_window, usp_set_cdc_watermark)
 4. Chuẩn bị bản dự phòng watermark updated_at + is_deleted nếu spike CDC không đạt
-5. Chạy trên retail_db bằng tài khoản admin Entra
+5. Chạy trên retail_db bằng tài khoản có db_owner: user Entra của P2 do P1 tạo ở AD-OPS-12, hoặc admin Entra (P1)
 
 **Đầu ra**
 
@@ -368,7 +368,7 @@ Bước 1 của luồng: 6 file Instacart vào landing/instacart/<bảng>/releas
 - Tài liệu: `docs/de/02_bronze_ldp.md §2.2`, `docs/de/06_van_hanh_chay_lai.md §3`, `bundles/AGENTS.md`
 - **Bắt đầu sau:** Không có.
 - **Hoàn tất còn cần:** [AD-OPS-19](01_devops.md#ad-ops-19) [#21](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/21), [AD-OPS-21](01_devops.md#ad-ops-21) [#23](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/23), [AD-OPS-20](01_devops.md#ad-ops-20) [#22](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/22), [AD-OPS-05](01_devops.md#ad-ops-05) [#7](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/7)
-- **Mở khóa:** [AD-DE-09](02_de_batch.md#ad-de-09) (hoàn tất), [AD-DE-16](02_de_batch.md#ad-de-16) (hoàn tất), [AD-DE-18](02_de_batch.md#ad-de-18) (bắt đầu), [AD-ST-03](03_de_stream.md#ad-st-03) (hoàn tất)
+- **Mở khóa:** [AD-OPS-21b](01_devops.md#ad-ops-21b) (hoàn tất), [AD-DE-09](02_de_batch.md#ad-de-09) (hoàn tất), [AD-DE-16](02_de_batch.md#ad-de-16) (hoàn tất), [AD-DE-18](02_de_batch.md#ad-de-18) (bắt đầu), [AD-ST-03](03_de_stream.md#ad-st-03) (hoàn tất)
 
 LDP instacart_batch chạy bronze → silver → gold. Dev cần tiền tố schema để không tranh bảng với prod.
 
@@ -820,7 +820,7 @@ Chốt G3 phía DE: ds_data v1 và file txt cho cụm Hadoop local sẵn sàng t
 
 - [ ] Task check xanh
 - [ ] _manifest.json đủ 3 cấp × 4 quy mô
-- [ ] Vai ds đọc được ds_data và exports; INSERT báo PERMISSION_DENIED
+- [ ] P4 (vai ds, không thuộc de) đọc được ds_data và exports; INSERT báo PERMISSION_DENIED
 - [ ] Chạy lại job với v1 không đổi dữ liệu
 
 ### AD-DE-22
@@ -884,7 +884,7 @@ Power BI chỉ đọc bảng nhỏ đã tổng hợp: kpi_daily, kpi_by_dow_hour
 
 - [ ] sum(items) của department_sales = count(*) của fact_order_lines
 - [ ] product_360 đúng 49.688 dòng
-- [ ] Vai bi đọc được gold.* qua warehouse, đọc silver.* bị PERMISSION_DENIED
+- [ ] P4 (vai bi) đọc được gold.* qua warehouse; SHOW GRANTS ON SCHEMA instacart.silver không có grant riêng cho vai bi (P4 còn vai ds nên đọc được silver)
 
 ### AD-DE-24
 
