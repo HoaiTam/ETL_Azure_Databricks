@@ -30,10 +30,25 @@ Ví dụ từ gốc repo với **sqlcmd (Go)**, sau khi đăng nhập Azure CLI 
 `RETAIL_SQL_SERVER` do người vận hành đặt vào shell, không ghi giá trị thật vào Git:
 
 ```bash
-sqlcmd -S "$RETAIL_SQL_SERVER" -d retail_db --authentication-method ActiveDirectoryDefault -Nm -b -i src/ingest/sql/01_schema.sql
-sqlcmd -S "$RETAIL_SQL_SERVER" -d retail_db --authentication-method ActiveDirectoryDefault -Nm -b -i src/ingest/sql/02_enable_cdc.sql
-sqlcmd -S "$RETAIL_SQL_SERVER" -d retail_db --authentication-method ActiveDirectoryDefault -Nm -b -i src/ingest/sql/03_etl_control.sql
+sqlcmd -S "$RETAIL_SQL_SERVER" -d retail_db --authentication-method ActiveDirectoryAzCli -Nm -b -i src/ingest/sql/01_schema.sql
+sqlcmd -S "$RETAIL_SQL_SERVER" -d retail_db --authentication-method ActiveDirectoryAzCli -Nm -b -i src/ingest/sql/02_enable_cdc.sql
+sqlcmd -S "$RETAIL_SQL_SERVER" -d retail_db --authentication-method ActiveDirectoryAzCli -Nm -b -i src/ingest/sql/03_etl_control.sql
 ```
+
+`ActiveDirectoryAzCli` chọn rõ phiên `az login`; quyền quản lý subscription không thay thế quyền SQL.
+Trên macOS có thể cài công cụ bằng `brew install azure-cli sqlcmd`, rồi tự đăng nhập Entra/MFA bằng
+`az login --use-device-code`. Trước khi chạy DDL, kiểm kết nối và quyền bằng truy vấn chỉ đọc:
+
+```bash
+sqlcmd -S "$RETAIL_SQL_SERVER" -d retail_db --authentication-method ActiveDirectoryAzCli -Nm -b -l 30 -t 30 \
+  -Q "SELECT DB_NAME() AS database_name, IS_MEMBER('db_owner') AS is_db_owner;"
+```
+
+Nếu database serverless báo chưa sẵn sàng, kiểm trạng thái bằng control plane rồi thử lại sau khi resume.
+Nếu lỗi firewall, P1 cần thêm IP thành viên qua `member_ips` và GitHub Variable `TF_VAR_MEMBER_IPS`,
+áp dụng theo workflow hạ tầng; không mở cả dải IP hoặc đổi free offer để vượt lỗi.
+Nếu đăng nhập SQL/kiểm quyền thất bại, dừng trước DDL và nhờ admin Entra kiểm quyền trong database.
+Không suy từ việc đã đăng nhập Azure hoặc database Online rằng thành viên đã có quyền SQL.
 
 Kiểm phiên bản client hỗ trợ `-Nm` (mã hóa bắt buộc), không dùng `-C` để bỏ kiểm chứng chỉ Azure.
 **Chỉ chạy bằng `sqlcmd -b`**, hoặc dùng công cụ đã bật **SQLCMD mode** và thêm `:On Error exit`
@@ -145,7 +160,12 @@ SQL Server image là amd64; máy Apple Silicon cần giả lập Docker (đã ki
 
 ## Nghiệm thu Azure còn chờ
 
-Sau khi #14 hoàn tất, chạy nhánh CDC đã đạt spike #8/#141 bằng admin Entra rồi chạy lại lần hai.
+#14 và #8 đã đóng. Lần kiểm 2026-11-18 đọc được control plane và xác nhận database Online,
+nhưng kết nối Entra SQL từ phiên P2 bị firewall từ chối; chưa kiểm được quyền SQL và chưa chạy DDL.
+P1 cần cấp đường truy cập cho thành viên trước khi nghiệm thu; không dùng trạng thái issue đã đóng
+hoặc kết quả regression local làm bằng chứng đã cài đặt trên database chính thức.
+
+Sau khi kết nối và quyền đạt, chạy nhánh CDC đã đạt spike #8/#141 bằng admin Entra rồi chạy lại lần hai.
 Trước lần ADF đầu, kiểm nguồn/mốc chưa có dữ liệu cũ; nếu mốc đã tồn tại, không tự reset để ép snapshot.
 Với CDC, lưu kết quả `is_cdc_enabled`, hai dòng `cdc.change_tables`, retention từ `sys.sp_cdc_help_jobs`
 và hai lệnh Lookup trả `snapshot` (chờ scheduler sẵn sàng rồi thử lại nếu LSN chưa sẵn sàng).

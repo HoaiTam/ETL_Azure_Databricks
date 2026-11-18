@@ -248,8 +248,12 @@ CDC theo LSN cần bảng nguồn, CDC bật trên 2 bảng, watermark và nhậ
   workflow `retail-sql-checks` chạy cùng regression khi PR sửa SQL/fixture/runner.
 - `uv sync --frozen`, `ruff check .`, `ruff format --check .` và toàn bộ **97 test Python** đều đạt
   sau khi rebase lên main đã tích hợp AD-DE-02/03 (#137/#138); diff chỉ còn AD-DE-04.
-- **Chưa nghiệm thu Azure:** AD-OPS-12 (#14) và AD-OPS-06 (#8) còn mở, chưa có đích retail_db/admin Entra
-  cho phiên này. Ba tiêu chí nghiệm thu trên giữ chưa tick vì kết quả local không thay thế kết quả Azure.
+- **Cập nhật 2026-11-18:** AD-OPS-12 (#14) và AD-OPS-06 (#8) đã đóng. Phiên P2 đã đăng nhập Azure,
+  đọc được control plane và xác nhận `retail_db` Online, free limit bật, chế độ hết free limit là AutoPause.
+  Kết nối Entra SQL bị firewall từ chối; chưa kiểm quyền `db_owner`, chưa chạy DDL hoặc nghiệm thu ba tiêu chí trên.
+- PR được rebase lên main sau #173; kiểm lại **97 test Python**, Ruff/format và regression SQL local đều đạt.
+  Hướng dẫn kết nối đã chọn rõ `ActiveDirectoryAzCli`, thêm preflight chỉ đọc và cách xử lý firewall/quyền.
+  Cần P1 cấp IP qua cấu hình Terraform/workflow rồi kiểm quyền SQL; giữ PR draft và ba tiêu chí chưa tick.
   Chưa triển khai seed/ADF (AD-DE-05/07), không tạo hay sửa tài nguyên cloud.
 
 ### AD-DE-05
