@@ -17,6 +17,7 @@ ingest = [
 
 [dependency-groups]
 dev = [
+    "delta-spark==3.3.3", # chạy kiểm thử MERGE thật trên Spark 3.5 local
     "pyspark>=3.5.0,<3.6", # DBR 15.4 LTS = Spark 3.5
     "pytest>=8",
     "ruff>=0.8",

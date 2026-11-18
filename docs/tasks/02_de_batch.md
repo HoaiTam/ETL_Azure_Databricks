@@ -828,8 +828,10 @@ DS cần bản dữ liệu cố định data_version v1, mã hóa item tất đ�
 
 **Xong khi**
 
-- [ ] Test local xanh: chạy hai lần cho cùng kết quả, không nhân dòng
-- [ ] idx tất định: tính lại ra cùng idx
+- [x] Test local xanh: chạy hai lần cho cùng kết quả, không nhân dòng
+- [x] idx tất định: tính lại ra cùng idx
+
+`tests/test_ds_prepare.py` chạy ba file SQL trên Spark + Delta local. Fixture kiểm hai phiên bản, vị trí món stream và mã `idx` khi đồng hạng tần suất. Nghiệm thu trên workspace G3 chờ nguồn silver của AD-DE-15. Job, file xuất và lần chạy `v1` thuộc AD-DE-21.
 
 ### AD-DE-21
 
