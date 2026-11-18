@@ -2,8 +2,8 @@
 
 `resources/pipeline_batch.yml` khai báo `instacart_batch`: classic single-node theo G0,
 edition Advanced, channel Current, chạy triggered, không Photon. Policy riêng
-`instacart-pipeline-single-node` và biến máy phải khớp AD-OPS-21. Runtime do pipeline
-quản lý, không gắn DBR của job vào pipeline. Cluster tắt sau 60 giây kể từ khi update xong;
+`instacart-pipeline-single-node` yêu cầu tag `cost_owner: p2` và biến máy phải khớp AD-OPS-21.
+Runtime do pipeline quản lý, không gắn DBR của job vào pipeline. Cluster tắt sau 60 giây kể từ khi update xong;
 không chạy đồng thời với job khác dùng quota 4 vCPU. SQL warehouse vẫn là serverless.
 
 | Target | Tên pipeline | Schema mặc định | Event log |
@@ -84,10 +84,8 @@ Quyền đọc event log cho vai khác vẫn theo AD-OPS-20; không tự mở r�
 
 ## Trạng thái nghiệm thu
 
-Đã có cấu hình và kiểm tra local của phần smoke/DDL. **Chưa kiểm** `bundle validate`,
-`bundle deploy`, tạo schema thật, update LDP và query event log trên workspace: máy triển khai
-chưa có CLI/profile được chỉ định, ba task hạ tầng #21/#22/#23 còn mở. PR giữ draft; chưa đóng #44.
-Không deploy prod thủ công, không đánh dấu hoàn tất ETL từ update smoke.
+Xem kết quả validate, deploy, smoke update và đọc event log trên [issue AD-DE-08](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/44).
+Smoke update kiểm đường chạy của pipeline và event log. Đối soát dữ liệu ETL thực hiện ở các task bronze, silver và gold.
 
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).

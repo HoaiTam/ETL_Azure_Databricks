@@ -18,7 +18,7 @@ resources:
           spark_conf:
             spark.databricks.cluster.profile: singleNode
           custom_tags:
-            owner: p2
+            cost_owner: p2
       configuration:
         landing_root: /Volumes/${var.catalog}/landing_meta/raw
         catalog: ${var.catalog}
