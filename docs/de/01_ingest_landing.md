@@ -185,77 +185,38 @@ job riêng ở [jobs_ingest.yml](../../bundles/resources/jobs_ingest.yml);
 
 ### 3.5 ADF pipeline `pl_ingest_retail_db`
 
-```
-ForEach t in [{ci:"dbo_product_prices", table:"product_prices"}, {ci:"dbo_promotions", table:"promotions"}]   (tuần tự)
-  └─ Execute pipeline pl_cdc_one_table(ci, table)
+Pipeline cha lần lượt gọi `pl_cdc_one_table` cho `dbo_product_prices` và `dbo_promotions`, chờ cả hai
+hoàn tất. Lookup gọi `etl.usp_get_cdc_window` bằng tham số SQL `capture_instance` và giữ nguyên đầu
+ra `mode`, `from_lsn`, `to_lsn` cho toàn tuyến của bảng.
 
-pl_cdc_one_table
-  ├─ Lookup   lk_window       → etl.usp_get_cdc_window(@ci)       → mode, from_lsn, to_lsn
-  ├─ Switch   mode
-  │   ├─ "empty"    → SP  etl.usp_set_cdc_watermark(mode='empty')  (chỉ ghi log, LSN giữ nguyên)
-  │   ├─ "snapshot" → Copy (SELECT * FROM dbo.<table>) → _staging → snapshot=<to_lsn>/   → SP set watermark
-  │   └─ "window"   → Copy (fn_cdc_get_all_changes) → _staging → window=<from>_<to>/     → SP set watermark
-  └─ (lỗi) → Web activity ghi cảnh báo / pipeline fail
-```
+| Mode | Nguồn và đường dẫn | Ghi mốc |
+|---|---|---|
+| `empty` | Không đọc hay ghi ADLS | Chỉ ghi log `rows = 0`, giữ nguyên watermark |
+| `snapshot` | Bảng hiện hành → Parquet `snapshot=<to_lsn>/` | Setter lấy `to_lsn` từ Lookup |
+| `window` | Hàm `cdc.fn_cdc_get_all_changes_*` với `from_lsn` và `to_lsn` inclusive → Parquet `window=<from_lsn>_<to_lsn>/` | Setter nhận đúng hai LSN và `rowsCopied` |
 
-Câu truy vấn nguồn của Copy ở nhánh `window` (dynamic content trong ADF):
+Snapshot đặt `_op = 0`, `_lsn = to_lsn` và `_seqval` bằng 0. Window giữ `_op` 1/2/4 với tùy chọn `all`
+và chuẩn hóa `_lsn`, `_seqval` thành hex 22 ký tự. Hai chế độ xuất cùng cột capture và cột kỹ thuật
+cho từng bảng. Các cột CDC gốc `__$…` là NULL có kiểu trong snapshot.
 
-```sql
-@concat('SELECT CONVERT(varchar(22), __$start_lsn, 1) AS _lsn, ',
-        'CONVERT(varchar(22), __$seqval, 1) AS _seqval, ',
-        '__$operation AS _op, * ',
-        'FROM cdc.fn_cdc_get_all_changes_', pipeline().parameters.ci, '(',
-        'CONVERT(binary(10), ''', activity('lk_window').output.firstRow.from_lsn, ''', 1), ',
-        'CONVERT(binary(10), ''', activity('lk_window').output.firstRow.to_lsn,   ''', 1), ',
-        'N''all'')')
-```
+Copy SQL ghi một file `part-00000.parquet` vào staging. Pipeline `pl_cdc_publish_slice` đối chiếu
+số dòng, Binary Copy có kiểm toàn vẹn, xác nhận file đích rồi xóa đúng file staging. Cửa sổ hợp lệ
+với 0 dòng được dọn staging và ghi log 0 dòng. Setter chỉ chạy sau khi publisher thành công.
+`from_lsn` được gửi riêng ở mode `window`. `snapshot` và `empty` dùng giá trị SQL mặc định NULL.
+Run ID cha dùng để truy vết và retry setter, không xuất hiện trong đường dẫn file.
 
-`SELECT *` của hàm CDC vẫn trả về các cột `__$…`. Dataset Parquet sẽ ghi cả những cột này. Bronze giữ nguyên, còn silver chỉ dùng `_lsn`, `_seqval`, `_op`.
+Snapshot đọc bảng hiện hành. Seed cần commit và CDC bắt kịp trước Lookup, sau đó không chạy seed
+đồng thời với lượt ingest. Một pipeline có concurrency 1 và là writer duy nhất cho đường dẫn này.
 
-Nhánh `snapshot`:
-
-```sql
-@concat('SELECT ''', activity('lk_window').output.firstRow.to_lsn, ''' AS _lsn, ',
-        '''0x00000000000000000000'' AS _seqval, 0 AS _op, * FROM dbo.', pipeline().parameters.table)
-```
-
-- `_op = 0` nghĩa là bản ghi snapshot, silver xử lý như upsert.
-- Snapshot đọc **bảng hiện hành**, không được ghim thành ảnh lịch sử ở `to_lsn`.
-  Có thể chồng lấn với cửa sổ CDC sau; silver xử lý bằng upsert theo khóa và `SEQUENCE BY`.
-  Không chạy seed đồng thời ADF và chờ capture bắt kịp trước Lookup; hệ thống ghi liên tục cần cơ chế snapshot nhất quán hơn.
-
-Đoạn JSON của activity gọi watermark **nhánh window** (dán vào `adf/pipelines/pl_cdc_one_table.json`):
-
-```json
-{
-  "name": "sp_set_watermark_window",
-  "type": "SqlServerStoredProcedure",
-  "dependsOn": [{ "activity": "del_staging_window", "dependencyConditions": ["Succeeded"] }],
-  "linkedServiceName": { "referenceName": "ls_sql_retail", "type": "LinkedServiceReference" },
-  "typeProperties": {
-    "storedProcedureName": "etl.usp_set_cdc_watermark",
-    "storedProcedureParameters": {
-      "capture_instance": { "value": "@pipeline().parameters.ci", "type": "String" },
-      "to_lsn":   { "value": "@activity('lk_window').output.firstRow.to_lsn", "type": "String" },
-      "from_lsn": { "value": "@activity('lk_window').output.firstRow.from_lsn", "type": "String" },
-      "mode":     { "value": "window", "type": "String" },
-      "adf_run_id": { "value": "@pipeline().RunId", "type": "String" },
-      "rows":     { "value": "@activity('cp_window_to_staging').output.rowsCopied", "type": "Int64" }
-    }
-  }
-}
-```
-
-Ở nhánh `snapshot` và `empty`, **không khai báo** `from_lsn` trong `storedProcedureParameters`;
-để procedure dùng mặc định SQL NULL. Không map `firstRow.from_lsn` rỗng/null thành String vì ADF có thể
-gửi chuỗi rỗng, gây lỗi định dạng 51003. Chỉ nhánh `window` dùng tham số này như ví dụ trên.
+JSON, thứ tự nạp resource, quyền và các bước debug/rerun nằm ở
+[ADF retail CDC](../../adf/README_RETAIL_CDC.md).
 
 ### 3.6 Vì sao CDC theo cách này không mất và không trùng
 
 | Tình huống | Điều xảy ra | Kết quả |
 |---|---|---|
-| Copy lỗi giữa chừng | Watermark **chưa** tăng. File dở chỉ nằm trong `_staging` | Chạy lại đọc **cùng** cửa sổ từ `from_lsn` cũ → không mất |
-| Lỗi sau khi công bố, trước khi gọi SP | Dữ liệu đã ở `window=A_B`, watermark chưa tăng | *Rerun from failed activity*: ADF giữ output của `lk_window` → chỉ chạy lại SP → không đọc lại |
+| Copy lỗi giữa chừng | Watermark **chưa** tăng. File dở chỉ nằm trong `_staging` | Rerun dùng Lookup đã giữ lại để đọc cùng cửa sổ. Lookup mới có thể lấy `to_lsn` khác |
+| Lỗi sau khi công bố, trước khi gọi SP | Dữ liệu đã ở `window=A_B`, watermark chưa tăng | Rerun dùng Lookup và ID cũ. Nếu ADF chạy lại cả nhánh Switch, đường dẫn vẫn là `window=A_B` |
 | Chạy lại **toàn bộ** pipeline sau lỗi như trên | `lk_window` tính lại: `from` cũ, `to` mới lớn hơn → thư mục `window=A_C` chứa lại các thay đổi của `A_B` | Bronze có **bản sao** của các thay đổi. Silver loại trùng theo `(_lsn, _seqval, khóa)` trước khi `AUTO CDC` ([03 §2.2](03_silver_cdc_scd_dq.md)) |
 | Pipeline dừng lâu hơn retention (7 ngày) | `increment(last_lsn) < min_lsn` → `mode = snapshot` | Chụp lại toàn bảng. Silver SCD2 xem như upsert; khoảng thay đổi bị mất được ghi nhận trong `etl.run_log` |
 
@@ -382,8 +343,8 @@ pl_master (trigger 02:00, tham số wave_seed: bool = false)
 |---|---|---|
 | Copy Zenodo | ADF Monitor → *Rerun from failed activity* | Chưa có `_SUCCESS` → bảng đó copy lại từ đầu vào `_staging`. Bảng đã xong thì bỏ qua |
 | Kiểm số dòng Zenodo fail | Kiểm tra lại nguồn, sửa `expected_rows`, rerun | Chưa công bố, landing sạch |
-| Copy CDC | *Rerun from failed activity* | Watermark chưa tăng → cùng cửa sổ, cùng thư mục |
-| SP set watermark | *Rerun from failed activity* | Chỉ chạy lại SP, dùng `to_lsn` cũ |
+| Copy CDC | *Rerun from failed activity* trên pipeline con, giữ output Lookup và ID lượt ingest | Watermark chưa tăng. Cùng cặp LSN thì dùng cùng thư mục |
+| SP set watermark | *Rerun from failed activity* trên pipeline con | Giữ ID lượt ingest cũ và tham số từ Lookup. Setter cùng đầu vào là no-op nếu đã commit |
 | Crawler OFF | Chạy lại job `off_crawler` | Trạng thái theo từng sản phẩm; tên file tất định |
 | Seed wave | Chạy lại cùng `--wave` | Transaction + `etl.seed_wave` |
 
