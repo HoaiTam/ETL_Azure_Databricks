@@ -143,6 +143,10 @@ Có Docker đang chạy, Python 3.11+, khoảng 3 GB RAM cho container và dung 
 python3 scripts/check_retail_sql.py
 ```
 
+AD-DE-05 bổ sung `uv run --extra ingest python scripts/check_retail_sql.py --seed` để kiểm seed bằng
+driver Python thật trên hai database thêm. Chỉ tùy chọn này mở cổng loopback ngẫu nhiên tạm thời;
+xem [hướng dẫn seed](../README.md) về dữ liệu kiểm thử và cơ chế tự dọn.
+
 Script tạo container tên ngẫu nhiên, pin SQL Server **2022 CU28 Developer** bằng digest,
 không publish port, sinh mật khẩu tạm trong bộ nhớ, tạo hai database test trắng và tự xóa container
 trong `finally`. Không đụng container/database có sẵn hoặc Azure; image được giữ trong cache Docker.
