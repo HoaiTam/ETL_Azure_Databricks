@@ -252,6 +252,14 @@ MERGE **lưu cả kết quả sai**, sau đó assert_true cuối file làm task 
 BI/điều tra; đây là hai transaction, không rollback kết quả sai khi assert đỏ. Repair bằng dữ liệu/expected
 đúng nguồn rồi chạy lại, không xóa lịch sử hay đổi số kỳ vọng để che sai.
 
+Nguồn trong reconcile là manifest CSV Instacart của profile tương ứng. Đối soát Azure SQL
+`retail_db` và Parquet CDC theo cửa sổ ADF thuộc nghiệm thu AD-DE-07.
+
+Bronze append-only có thể giữ cả bản cũ và file nạp lại. Check so số khóa phân biệt theo manifest.
+Check payload chọn bản hợp lệ mới nhất theo khóa rồi dùng một FULL OUTER JOIN và so null-safe.
+Số dòng thô dùng để điều tra lượng replay, không quyết định qua cổng. Đo thời gian trên warehouse
+khi đầy đủ nguồn G3 và lưu vào báo cáo cùng quy mô dữ liệu.
+
 ### 4.3 Chạy và xem kết quả
 
 Chạy init với catalog/ops_schema rồi cấu hình profile. Mỗi file reconcile nhận tám tham số STRING:

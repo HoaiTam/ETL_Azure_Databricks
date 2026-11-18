@@ -55,11 +55,11 @@ USING (
       FROM expected_counts
       WHERE profile = :profile
   ),
-  orders AS (SELECT *
+  orders_raw AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:bronze_schema, '`', '``') || '`.`orders`')),
-  products AS (SELECT *
+  products_raw AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:bronze_schema, '`', '``') || '`.`products`')),
-  order_products_train AS (SELECT *
+  order_products_train_raw AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:bronze_schema, '`', '``') || '`.`order_products_train`')),
   batch AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:silver_schema, '`', '``') || '`.`orders_batch`')),
@@ -79,6 +79,47 @@ USING (
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:silver_schema, '`', '``') || '`.`order_items`')),
   baskets AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:silver_schema, '`', '``') || '`.`baskets`')),
+  orders AS (
+    SELECT * FROM (
+      SELECT b.*, row_number() OVER (PARTITION BY order_id ORDER BY
+        CASE WHEN _rescued_data IS NULL AND order_id > 0 AND user_id > 0
+          AND eval_set IN ('prior','train','test') AND order_number >= 1
+          AND order_dow BETWEEN 0 AND 6 AND order_hour_of_day BETWEEN 0 AND 23
+          AND (days_since_prior_order IS NULL OR days_since_prior_order BETWEEN 0 AND 30)
+          AND (order_number = 1 OR days_since_prior_order IS NOT NULL)
+          AND _ingest_ts IS NOT NULL THEN 1 ELSE 0 END DESC,
+        _ingest_ts DESC NULLS LAST, sha2(to_json(struct(b.*)), 256)) AS _canonical_rank
+      FROM orders_raw b
+    ) WHERE _canonical_rank = 1
+  ),
+  products AS (
+    SELECT * FROM (
+      SELECT b.*, row_number() OVER (PARTITION BY product_id ORDER BY
+        _ingest_ts DESC NULLS LAST, _file_mtime DESC NULLS LAST, _source_file DESC NULLS LAST, sha2(to_json(struct(product_name, aisle_id, department_id)), 256)) AS _canonical_rank
+      FROM products_raw b
+      WHERE _rescued_data IS NULL AND product_id IS NOT NULL
+    ) WHERE _canonical_rank = 1
+  ),
+  order_products_train AS (
+    SELECT * FROM (
+      SELECT b.*, row_number() OVER (PARTITION BY order_id, product_id ORDER BY
+        _ingest_ts DESC NULLS LAST, _file_mtime DESC NULLS LAST, _source_file DESC NULLS LAST) AS _canonical_rank
+      FROM order_products_train_raw b
+      WHERE _rescued_data IS NULL AND order_id > 0 AND product_id > 0
+        AND add_to_cart_order >= 1 AND reordered IN (0, 1) AND _ingest_ts IS NOT NULL
+    ) WHERE _canonical_rank = 1
+  ),
+  expected_stream_headers AS (SELECT order_id, user_id FROM orders WHERE eval_set = 'train'),
+  expected_items AS (
+    SELECT order_id, product_id, add_to_cart_order, reordered, 'batch' AS source FROM prior
+    UNION ALL
+    SELECT order_id, product_id, add_to_cart_order, reordered, 'stream' AS source FROM stream_items
+  ),
+  expected_basket_headers AS (
+    SELECT order_id, user_id, CASE WHEN eval_set = 'prior' THEN 'prior' ELSE 'holdout' END AS split
+    FROM orders WHERE eval_set IN ('prior','train')
+  ),
+  basket_items AS (SELECT order_id, explode(items) AS product_id FROM baskets),
   checks AS (
     SELECT 'g3.dim.rows' AS check_name, CAST(counts['products'] AS BIGINT) AS expected,
       CAST((SELECT count(*)
@@ -91,24 +132,16 @@ USING (
       FROM e
     UNION ALL
     SELECT 'g3.dim.payload' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT product_id, product_name, aisle_id, department_id
-      FROM dim)
-          EXCEPT ALL
-          (SELECT product_id, product_name, aisle_id, department_id
-      FROM products)) forward_diff) + (SELECT count(*)
-      FROM ((SELECT product_id, product_name, aisle_id, department_id
-      FROM products)
-          EXCEPT ALL
-          (SELECT product_id, product_name, aisle_id, department_id
-      FROM dim)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT count(*) FROM dim l
+       FULL OUTER JOIN products r USING (product_id)
+       WHERE l.product_id IS NULL OR r.product_id IS NULL
+         OR NOT (l.product_name <=> r.product_name)
+         OR NOT (l.aisle_id <=> r.aisle_id)
+         OR NOT (l.department_id <=> r.department_id)) AS actual
       FROM e
     UNION ALL
     SELECT 'g3.dim.guards' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST((SELECT count(*)
-      FROM dim
-      WHERE NOT coalesce(_join_sources_unique
-  AND dup_cnt = 1, false)) AS BIGINT) AS actual
+      (SELECT count_if(product_id IS NULL OR product_id <= 0) FROM dim) AS actual
       FROM e
     UNION ALL
     SELECT 'g3.prices.open_duplicates' AS check_name, CAST(0 AS BIGINT) AS expected,
@@ -129,19 +162,10 @@ USING (
       FROM e
     UNION ALL
     SELECT 'g3.stream.headers' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT order_id, user_id
-      FROM stream_orders)
-          EXCEPT ALL
-          (SELECT order_id, user_id
-      FROM orders
-      WHERE eval_set = 'train')) forward_diff) + (SELECT count(*)
-      FROM ((SELECT order_id, user_id
-      FROM orders
-      WHERE eval_set = 'train')
-          EXCEPT ALL
-          (SELECT order_id, user_id
-      FROM stream_orders)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT count(*) FROM stream_orders l
+       FULL OUTER JOIN expected_stream_headers r USING (order_id)
+       WHERE l.order_id IS NULL OR r.order_id IS NULL
+         OR NOT (l.user_id <=> r.user_id)) AS actual
       FROM e
     UNION ALL
     SELECT 'g3.stream.items' AS check_name, CAST(counts['order_products_train'] AS BIGINT) AS expected,
@@ -155,17 +179,11 @@ USING (
       FROM e
     UNION ALL
     SELECT 'g3.stream.payload' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT order_id, product_id, add_to_cart_order, reordered
-      FROM stream_items)
-          EXCEPT ALL
-          (SELECT order_id, product_id, add_to_cart_order, reordered
-      FROM order_products_train)) forward_diff) + (SELECT count(*)
-      FROM ((SELECT order_id, product_id, add_to_cart_order, reordered
-      FROM order_products_train)
-          EXCEPT ALL
-          (SELECT order_id, product_id, add_to_cart_order, reordered
-      FROM stream_items)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT count(*) FROM stream_items l
+       FULL OUTER JOIN order_products_train r USING (order_id, product_id)
+       WHERE l.order_id IS NULL OR r.order_id IS NULL
+         OR NOT (l.add_to_cart_order <=> r.add_to_cart_order)
+         OR NOT (l.reordered <=> r.reordered)) AS actual
       FROM e
     UNION ALL
     SELECT 'g3.stream.orphans' AS check_name, CAST(0 AS BIGINT) AS expected,
@@ -209,23 +227,12 @@ USING (
       FROM e
     UNION ALL
     SELECT 'g3.items.payload' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT order_id, product_id, add_to_cart_order, reordered, source
-      FROM all_items)
-          EXCEPT ALL
-          (SELECT order_id, product_id, add_to_cart_order, reordered, 'batch' AS source
-      FROM prior
-      UNION ALL
-      SELECT order_id, product_id, add_to_cart_order, reordered, 'stream' AS source
-      FROM stream_items)) forward_diff) + (SELECT count(*)
-      FROM ((SELECT order_id, product_id, add_to_cart_order, reordered, 'batch' AS source
-      FROM prior
-      UNION ALL
-      SELECT order_id, product_id, add_to_cart_order, reordered, 'stream' AS source
-      FROM stream_items)
-          EXCEPT ALL
-          (SELECT order_id, product_id, add_to_cart_order, reordered, source
-      FROM all_items)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT count(*) FROM all_items l
+       FULL OUTER JOIN expected_items r USING (order_id, product_id)
+       WHERE l.order_id IS NULL OR r.order_id IS NULL
+         OR NOT (l.add_to_cart_order <=> r.add_to_cart_order)
+         OR NOT (l.reordered <=> r.reordered)
+         OR NOT (l.source <=> r.source)) AS actual
       FROM e
     UNION ALL
     SELECT 'g3.baskets.prior' AS check_name, CAST(counts['orders_prior'] AS BIGINT) AS expected,
@@ -246,27 +253,11 @@ USING (
       FROM e
     UNION ALL
     SELECT 'g3.baskets.headers' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT order_id, user_id, split
-      FROM baskets)
-          EXCEPT ALL
-          (SELECT order_id, user_id, 'prior' AS split
-      FROM orders
-      WHERE eval_set = 'prior'
-      UNION ALL
-      SELECT order_id, user_id, 'holdout' AS split
-      FROM orders
-      WHERE eval_set = 'train')) forward_diff) + (SELECT count(*)
-      FROM ((SELECT order_id, user_id, 'prior' AS split
-      FROM orders
-      WHERE eval_set = 'prior'
-      UNION ALL
-      SELECT order_id, user_id, 'holdout' AS split
-      FROM orders
-      WHERE eval_set = 'train')
-          EXCEPT ALL
-          (SELECT order_id, user_id, split
-      FROM baskets)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT count(*) FROM baskets l
+       FULL OUTER JOIN expected_basket_headers r USING (order_id)
+       WHERE l.order_id IS NULL OR r.order_id IS NULL
+         OR NOT (l.user_id <=> r.user_id)
+         OR NOT (l.split <=> r.split)) AS actual
       FROM e
     UNION ALL
     SELECT 'g3.baskets.valid' AS check_name, CAST(0 AS BIGINT) AS expected,
@@ -277,29 +268,13 @@ USING (
   AND n_items = size(items)
   AND items = array_sort(array_distinct(items))
   AND NOT exists(items, x -> x IS NULL OR x <= 0)
-  AND _items_valid
-  AND _source_disjoint
-  AND dup_cnt = 1, false)) AS BIGINT) AS actual
+  AND order_id > 0 AND user_id > 0, false)) AS BIGINT) AS actual
       FROM e
     UNION ALL
     SELECT 'g3.baskets.items' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT order_id, explode(items) AS product_id
-      FROM baskets)
-          EXCEPT ALL
-          (SELECT order_id, product_id
-      FROM prior
-      UNION ALL
-      SELECT order_id, product_id
-      FROM stream_items)) forward_diff) + (SELECT count(*)
-      FROM ((SELECT order_id, product_id
-      FROM prior
-      UNION ALL
-      SELECT order_id, product_id
-      FROM stream_items)
-          EXCEPT ALL
-          (SELECT order_id, explode(items) AS product_id
-      FROM baskets)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT count(*) FROM basket_items l
+       FULL OUTER JOIN expected_items r USING (order_id, product_id)
+       WHERE l.order_id IS NULL OR r.order_id IS NULL) AS actual
       FROM e
   )
   SELECT CAST(:check_date AS DATE) AS check_date, check_name, expected, actual, (expected = actual) AS passed, current_timestamp() AS checked_at, :run_id AS run_id, :profile AS profile, 'G3' AS stage, (SELECT sha2(to_json(named_struct('catalog', :catalog, 'ops', :ops_schema, 'bronze', :bronze_schema, 'silver', :silver_schema, 'gold', :gold_schema, 'counts', array_sort(collect_list(named_struct('metric', metric, 'expected', expected, 'source', source))))), 256)

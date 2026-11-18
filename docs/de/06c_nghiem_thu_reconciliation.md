@@ -21,6 +21,10 @@ nguồn, không phải kết quả pipeline thật. G4 chỉ chạy sau AD-DE-22
 
 ## Cấu hình kỳ vọng độc lập nguồn
 
+Profile chỉ đối soát sáu CSV Instacart. Kiểm tra Azure SQL retail và cửa sổ CDC theo AD-DE-07.
+Khi cần đối chiếu replay, chạy `COUNT(*)` trên bảng bronze để xem số dòng thô bên cạnh số khóa
+phân biệt. Chỉ số khóa phân biệt và payload đã chọn theo khóa dùng để chặn cổng.
+
 1. Chạy `init_reconciliation.sql` trên warehouse **serverless** `wh-instacart-bi` với tham số
    `catalog` và `ops_schema` dev đã resolve. Schema phải tồn tại; file không cấp grant/tạo schema.
 2. Profile `instacart_2017` seed **số tham chiếu chưa xác minh trên Zenodo trong phiên này**:
@@ -80,7 +84,7 @@ refresh_bi chạy khi stage yêu cầu thành công; PR này chưa khai báo job
 - Chạy cùng stage hai lần trong ngày: số khóa không đổi; checked_at mới hơn được phép, đó là thời điểm kiểm.
 - Chỉ ở dev: đổi tạm expected products trong profile, chạy batch. Phải có hàng failed và task đỏ.
   Khôi phục expected đúng nguồn rồi repair sequence, hàng đó cập nhật về passed, không thêm khóa mới.
-- Kiểm một lỗi có cùng count: payload món bị đổi hoặc một item giỏ sai. EXCEPT ALL hai chiều phải bắt được,
+- Kiểm một lỗi có cùng count: payload món bị đổi hoặc một item giỏ sai. FULL OUTER JOIN theo khóa và so null-safe phải bắt được,
   không chỉ dựa vào count/distinct. Các check stream đối chiếu header/train payload với bronze train;
   basket đối chiếu header/split và explode(items) với các target món.
 - Không sửa bảng do pipeline quản lý trên cloud để diễn tập. Dùng fixture local hoặc nguồn dev hợp lệ rồi

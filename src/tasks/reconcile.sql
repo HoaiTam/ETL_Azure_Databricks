@@ -26,9 +26,9 @@ USING (
       FROM expected_counts
       WHERE profile = :profile
   ),
-  orders AS (SELECT *
+  orders_raw AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:bronze_schema, '`', '``') || '`.`orders`')),
-  order_products_prior AS (SELECT *
+  order_products_prior_raw AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:bronze_schema, '`', '``') || '`.`order_products_prior`')),
   order_products_train AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:bronze_schema, '`', '``') || '`.`order_products_train`')),
@@ -44,35 +44,52 @@ USING (
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:silver_schema, '`', '``') || '`.`orders_batch`')),
   prior AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:silver_schema, '`', '``') || '`.`order_items_prior`')),
+  orders AS (
+    SELECT * FROM (
+      SELECT b.*, row_number() OVER (PARTITION BY order_id ORDER BY
+        CASE WHEN _rescued_data IS NULL AND order_id > 0 AND user_id > 0
+          AND eval_set IN ('prior','train','test') AND order_number >= 1
+          AND order_dow BETWEEN 0 AND 6 AND order_hour_of_day BETWEEN 0 AND 23
+          AND (days_since_prior_order IS NULL OR days_since_prior_order BETWEEN 0 AND 30)
+          AND (order_number = 1 OR days_since_prior_order IS NOT NULL)
+          AND _ingest_ts IS NOT NULL THEN 1 ELSE 0 END DESC,
+        _ingest_ts DESC NULLS LAST, sha2(to_json(struct(b.*)), 256)) AS _canonical_rank
+      FROM orders_raw b
+    ) WHERE _canonical_rank = 1
+  ),
+  order_products_prior AS (
+    SELECT * FROM (
+      SELECT b.*, row_number() OVER (PARTITION BY order_id, product_id ORDER BY
+        _ingest_ts DESC NULLS LAST, _file_mtime DESC NULLS LAST, _source_file DESC NULLS LAST) AS _canonical_rank
+      FROM order_products_prior_raw b
+      WHERE _rescued_data IS NULL AND order_id > 0 AND product_id > 0
+        AND add_to_cart_order >= 1 AND reordered IN (0, 1) AND _ingest_ts IS NOT NULL
+    ) WHERE _canonical_rank = 1
+  ),
+  batch_expected AS (SELECT order_id, user_id, eval_set FROM orders WHERE eval_set IN ('prior','test')),
   checks AS (
     SELECT 'bronze.orders' AS check_name, CAST(counts['orders'] AS BIGINT) AS expected,
-      CAST((SELECT count(*)
-      FROM orders) AS BIGINT) AS actual
+      (SELECT count(DISTINCT order_id) FROM orders_raw) AS actual
       FROM e
     UNION ALL
     SELECT 'bronze.order_products_prior' AS check_name, CAST(counts['order_products_prior'] AS BIGINT) AS expected,
-      CAST((SELECT count(*)
-      FROM order_products_prior) AS BIGINT) AS actual
+      (SELECT count(DISTINCT order_id, product_id) FROM order_products_prior_raw) AS actual
       FROM e
     UNION ALL
     SELECT 'bronze.order_products_train' AS check_name, CAST(counts['order_products_train'] AS BIGINT) AS expected,
-      CAST((SELECT count(*)
-      FROM order_products_train) AS BIGINT) AS actual
+      (SELECT count(DISTINCT order_id, product_id) FROM order_products_train) AS actual
       FROM e
     UNION ALL
     SELECT 'bronze.products' AS check_name, CAST(counts['products'] AS BIGINT) AS expected,
-      CAST((SELECT count(*)
-      FROM products) AS BIGINT) AS actual
+      (SELECT count(DISTINCT product_id) FROM products) AS actual
       FROM e
     UNION ALL
     SELECT 'bronze.aisles' AS check_name, CAST(counts['aisles'] AS BIGINT) AS expected,
-      CAST((SELECT count(*)
-      FROM aisles) AS BIGINT) AS actual
+      (SELECT count(DISTINCT aisle_id) FROM aisles) AS actual
       FROM e
     UNION ALL
     SELECT 'bronze.departments' AS check_name, CAST(counts['departments'] AS BIGINT) AS expected,
-      CAST((SELECT count(*)
-      FROM departments) AS BIGINT) AS actual
+      (SELECT count(DISTINCT department_id) FROM departments) AS actual
       FROM e
     UNION ALL
     SELECT 'bronze.orders.prior' AS check_name, CAST(counts['orders_prior'] AS BIGINT) AS expected,
@@ -94,8 +111,7 @@ USING (
       FROM e
     UNION ALL
     SELECT 'bronze.orders.keys' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST((SELECT count(*) - count(DISTINCT order_id)
-      FROM orders) AS BIGINT) AS actual
+      (SELECT count_if(order_id IS NULL OR order_id <= 0) FROM orders) AS actual
       FROM e
     UNION ALL
     SELECT 'bronze.orders.invalid' AS check_name, CAST(0 AS BIGINT) AS expected,
@@ -131,19 +147,11 @@ USING (
       FROM e
     UNION ALL
     SELECT 'silver.batch.headers' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT order_id, user_id, eval_set
-      FROM batch)
-          EXCEPT ALL
-          (SELECT order_id, user_id, eval_set
-      FROM orders
-      WHERE eval_set IN ('prior','test'))) forward_diff) + (SELECT count(*)
-      FROM ((SELECT order_id, user_id, eval_set
-      FROM orders
-      WHERE eval_set IN ('prior','test'))
-          EXCEPT ALL
-          (SELECT order_id, user_id, eval_set
-      FROM batch)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT count(*) FROM batch l
+       FULL OUTER JOIN batch_expected r USING (order_id)
+       WHERE l.order_id IS NULL OR r.order_id IS NULL
+         OR NOT (l.user_id <=> r.user_id)
+         OR NOT (l.eval_set <=> r.eval_set)) AS actual
       FROM e
     UNION ALL
     SELECT 'silver.prior.rows' AS check_name, CAST(counts['order_products_prior'] AS BIGINT) AS expected,
@@ -157,17 +165,11 @@ USING (
       FROM e
     UNION ALL
     SELECT 'silver.prior.payload' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT order_id, product_id, add_to_cart_order, reordered
-      FROM prior)
-          EXCEPT ALL
-          (SELECT order_id, product_id, add_to_cart_order, reordered
-      FROM order_products_prior)) forward_diff) + (SELECT count(*)
-      FROM ((SELECT order_id, product_id, add_to_cart_order, reordered
-      FROM order_products_prior)
-          EXCEPT ALL
-          (SELECT order_id, product_id, add_to_cart_order, reordered
-      FROM prior)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT count(*) FROM prior l
+       FULL OUTER JOIN order_products_prior r USING (order_id, product_id)
+       WHERE l.order_id IS NULL OR r.order_id IS NULL
+         OR NOT (l.add_to_cart_order <=> r.add_to_cart_order)
+         OR NOT (l.reordered <=> r.reordered)) AS actual
       FROM e
     UNION ALL
     SELECT 'silver.prior.orphans' AS check_name, CAST(0 AS BIGINT) AS expected,

@@ -102,13 +102,20 @@ def recon(spark, request):
         spark.sql(render("spark_catalog", schemas["ops"], "fixture", manifest())).collect()
         for name, schema in ddl.items():
             filename = name.replace("order_products_", "order_products__")
+            source = spark.read.schema(schema).option("header", "true").csv(str(FIXTURE / f"{filename}.csv"))
             put(
-                "bronze", name, spark.read.schema(schema).option("header", "true").csv(str(FIXTURE / f"{filename}.csv"))
+                "bronze",
+                name,
+                source.withColumn("_ingest_ts", F.lit("2026-03-29 00:00:00").cast("timestamp_ltz"))
+                .withColumn("_file_mtime", F.col("_ingest_ts"))
+                .withColumn("_source_file", F.lit(filename))
+                .withColumn("_rescued_data", F.lit(None).cast("string")),
             )
-        orders = table("bronze", "orders")
-        prior = table("bronze", "order_products_prior")
-        train = table("bronze", "order_products_train")
-        products = table("bronze", "products")
+        metadata = ("_ingest_ts", "_file_mtime", "_source_file", "_rescued_data")
+        orders = table("bronze", "orders").drop(*metadata)
+        prior = table("bronze", "order_products_prior").drop(*metadata)
+        train = table("bronze", "order_products_train").drop(*metadata)
+        products = table("bronze", "products").drop(*metadata)
         stamp = F.lit("2026-03-30T00:00:00Z").cast("timestamp_ltz")
         batch = (
             orders.where("eval_set <> 'train'")
@@ -203,6 +210,18 @@ def test_g3_g4_stages_require_fresh_prerequisites_and_do_not_add_daily_rows(reco
     recon.params["run_id"] = "run-b"
     with pytest.raises(Exception, match="prerequisite checks are stale"):
         recon.script("reconcile_g3.sql")
+
+
+def test_replayed_bronze_files_are_not_expected_as_new_business_rows(recon):
+    for name in ("orders", "order_products_prior", "order_products_train", "products", "aisles", "departments"):
+        original = recon.table("bronze", name)
+        replay = original.withColumn("_ingest_ts", F.expr("_ingest_ts + INTERVAL 1 DAY")).withColumn(
+            "_source_file", F.concat("_source_file", F.lit("_fix1"))
+        )
+        replay.write.mode("append").saveAsTable(f"`{recon.schemas['bronze']}`.`{name}`")
+    recon.script("reconcile.sql")
+    recon.script("reconcile_g3.sql")
+    assert len(checks(recon)) == 47 and all(row.passed for row in checks(recon).values())
 
 
 def test_wrong_expected_count_is_recorded_red_and_repair_reuses_daily_key(recon, spark):
