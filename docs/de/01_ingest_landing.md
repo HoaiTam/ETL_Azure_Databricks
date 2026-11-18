@@ -136,7 +136,7 @@ retry cùng `(adf_run_id, capture_instance)` và nội dung là no-op, khác n�
 Chỉ gọi setter sau khi công bố landing và xóa staging thành công.
 
 **Spike free offer đã đạt (#8, PR #141):** P1 xác nhận CDC trên Azure SQL free offer.
-AD-DE-04 vẫn cần chạy nghiệm thu trên `retail_db` do #14 cấp; kết quả local không thay thế bước này.
+AD-DE-04 đã nghiệm thu trên `retail_db` do #14 cấp qua PR #140 ngày 2026-11-18.
 Nhánh §3.7 chỉ là dự phòng, không chạy cùng 02/03.
 
 LSN được truyền qua ADF dưới dạng **chuỗi hex cố định 22 ký tự** (`0x` + 20 chữ số hex). Chuỗi cùng độ dài thì so sánh theo thứ tự chữ cũng chính là so sánh theo số. Nhờ vậy ở silver có thể dùng chuỗi này trực tiếp trong `SEQUENCE BY`.
@@ -166,7 +166,7 @@ job riêng ở [jobs_ingest.yml](../../bundles/resources/jobs_ingest.yml);
   CDC hủy khuyến mãi bằng DELETE; nhánh §3.7 dùng `is_deleted` và thời gian wave.
 - `--dry-run` kiểm kế hoạch trên CSV thật mà không kết nối SQL/Spark hoặc đọc secret.
   Regression Docker kiểm đủ 5 wave trên 49.688 mã tự dựng, gồm CDC, rollback và chạy đồng thời.
-  Chạy dev/đối soát Azure vẫn chờ AD-DE-04 và AD-OPS-22.
+  AD-DE-04 và AD-OPS-22 đã hoàn tất. Nghiệm thu seed còn chờ CSV landing của AD-DE-06 hoặc bản danh mục thật đã cấp trên volume.
 
 ### 3.5 ADF pipeline `pl_ingest_retail_db`
 

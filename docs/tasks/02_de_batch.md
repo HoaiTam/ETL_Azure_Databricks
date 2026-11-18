@@ -297,21 +297,18 @@ CDC cần insert, update, delete thật. Script sinh giá và khuyến mãi theo
   Hỗ trợ CDC và soft delete, mật khẩu đường chạy thật chỉ đọc từ scope `kv`.
 - `bundles/resources/jobs_ingest.yml`: job chạy tay `seed_retail_db`, tham số wave/đích/CSV,
   cluster theo policy, một run, retry thủ công an toàn, pin `pymssql==2.4.6`.
-- **21 test seed**, toàn bộ **118 test Python**, Ruff và parse YAML đều đạt.
+- **25 test seed**, toàn bộ **122 test Python**, Ruff và parse YAML đều đạt.
   Regression SQL Server 2022 CU28 local đạt cho cả 5 wave ở hai chế độ với 49.688 mã tự dựng:
   wave 0 có 49.688 giá/3.000 khuyến mãi; wave 1 có 2.484 giá UPDATE, 300 INSERT, 50 gia hạn, 30 hủy;
   đã kiểm CDC thật, lỗi giữa đợt rollback toàn bộ và hai connection đồng thời chỉ áp dụng một lần.
 - Dry-run trên `data/instacart/products.csv` thật xác nhận 49.688 sản phẩm; regression SQL dùng dữ liệu
   tự dựng, không phải đã seed danh mục thật lên Azure. Runner/CI bổ sung tùy chọn `--seed`, tự dọn Docker.
-- **Chưa nghiệm thu G1:** AD-DE-04 (#140) và AD-OPS-22 (#24) chưa hoàn tất;
-  chưa deploy/chạy dev, chưa kiểm bundle bằng CLI/workspace hoặc đọc secret thật.
-  Spike #141 cho biết CDC free offer đã đạt; job đã theo G0 #146, không dùng `apply_policy_default_values`
-  và khai đủ trường fixed để tránh default auto-termination. Giữ ba tiêu chí nghiệm thu Azure ở trên chưa tick.
+- **Chưa nghiệm thu G1:** AD-DE-04 (#40) đã nghiệm thu và #24 đã triển khai scope `kv`.
+  CSV landing mặc định còn chờ AD-DE-06 (#42). Giữ ba tiêu chí nghiệm thu Azure ở trên chưa tick.
 
 **Bổ sung sau review:** kiểm fingerprint mọi wave trước khi áp dụng đợt mới; giữ lỗi gốc nếu rollback/close lỗi.
-Job không tự retry; theo chốt G0 #146 dùng SQL auth + Entra admin và khai đủ fixed fields của policy,
-không lấy default auto-termination. Cần P1 triển khai #14/#24 đúng cấu hình trước nghiệm thu; CSV mặc định
-còn chờ AD-DE-06. Review bổ sung 4 test, toàn nhánh 122 test và regression SQL/seed hai chế độ đạt.
+Job dùng SQL auth, retry thủ công và khai đủ trường fixed của policy theo chốt G0 #146.
+Khi có CSV, chạy job dev để kiểm scope, xác thực SQL, hai lượt wave 0 và CDC sau wave 1.
 
 ### AD-DE-06
 

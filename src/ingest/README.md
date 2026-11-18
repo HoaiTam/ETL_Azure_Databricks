@@ -5,11 +5,11 @@
 
 ## Điều kiện
 
-- AD-DE-04 (#40, PR #140): cài schema nguồn và chọn đúng CDC hoặc timestamp + soft delete.
+- AD-DE-04 (#40, PR #140) đã nghiệm thu schema nguồn và CDC trên `retail_db`.
 - AD-DE-06 (#42, PR #144): landing CSV danh mục theo đường dẫn mặc định. Nếu truyền `products_csv` khác,
   người vận hành vẫn phải cấp CSV thật và quyền đọc trước khi nghiệm thu.
-- AD-OPS-22 (#24): policy `instacart-single-node`, quyền dùng cluster/đọc volume và secret scope `kv`
-  có key `sql-admin-password`. Người chạy job phải có quyền đọc key; mật khẩu không truyền qua tham số.
+- Policy `instacart-single-node` (#23) và secret scope `kv` (#24) đã được triển khai.
+  Người chạy job cần quyền dùng policy, đọc volume và đọc key `sql-admin-password` qua scope.
 - CSV `products.csv` đủ **49.688** sản phẩm, `product_id` duy nhất và `department_id` hợp lệ.
   Chưa có ADF ingest thì đưa CSV thật vào volume trước, hoặc truyền đường dẫn CSV thật khác đã cấp quyền.
 - Không có ADF đang đọc nguồn. Mỗi wave nằm trong một transaction; không chạy nhiều wave song song.
@@ -82,9 +82,8 @@ databricks bundle run seed_retail_db -t dev --profile <profile> --params "wave=0
 
 `RETAIL_SQL_SERVER` do người vận hành đặt trong shell từ output hạ tầng, không đưa giá trị thật vào Git.
 **Xác thực theo chốt G0 #146:** server chính thức dùng SQL auth **cộng** Entra admin, không Entra-only
-như server spike ban đầu. Code dùng SQL login `sqladmin` và secret `sql-admin-password` đúng quyết định này;
-chưa cần đổi sang driver/token SP/MI. Trước nghiệm thu, P1 phải triển khai và kiểm SQL auth ở #14,
-secret scope/quyền ở #24; không chạy job nếu endpoint vẫn đang Entra-only (sẽ Login failed).
+như server spike ban đầu. SQL login `sqladmin` và secret `sql-admin-password` đã được tạo.
+Xác nhận job dev đọc được scope `kv` và kết nối SQL trước khi chạy wave 0.
 
 Job mặc định để server rỗng để tránh kết nối nhầm; truyền thêm `user` nếu tài khoản khác `sqladmin`.
 Đường dẫn CSV mặc định là `/Volumes/<catalog>/landing_meta/raw/instacart/products/release=2017/products.csv`;
@@ -111,8 +110,7 @@ uv run --extra ingest python scripts/check_retail_sql.py --seed
   Python dùng driver thật. Mật khẩu local sinh trong bộ nhớ, truyền child qua stdin, không ghi file/log;
   container/cổng được dọn trong `finally`. Không kết nối Azure hoặc database có sẵn.
 - Workflow `retail-sql-checks` cài extra ingest và chạy cùng lệnh. Pytest và regression SQL là hai nhóm riêng.
-- Local/CI không thay thế nghiệm thu job dev, secret scope và Azure SQL free offer.
-  Hiện chờ #40/#24/#42, P1 triển khai SQL auth + secret và kiểm policy đúng chốt G0;
-  chưa deploy/chạy dev hoặc tạo chi phí cloud.
+- Nghiệm thu job dev còn chờ CSV của #42 hoặc một bản danh mục thật đã được nhóm cấp trên volume.
+  Chạy wave 0, chạy lại wave 0, rồi chạy wave 1 và đối soát CDC trên Azure.
 
 Tham chiếu driver: [pymssql](https://pymssql.readthedocs.io/en/stable/ref/pymssql.html).

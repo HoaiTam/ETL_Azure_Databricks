@@ -29,7 +29,7 @@
 - `server` mặc định rỗng, người chạy truyền bằng job parameter; không ghi endpoint riêng vào YAML.
   Dev/prod chỉ tách tên job, không tách database nguồn; kiểm `server`/`database` trước khi chạy.
 - `products_csv` phải là danh mục thật đủ 49.688 sản phẩm; xem `src/ingest/README.md`.
-  Chưa deploy/chạy dev khi AD-DE-04 hoặc AD-OPS-22 chưa nghiệm thu.
+  Đường dẫn mặc định cần landing CSV từ AD-DE-06. Kiểm quyền đọc CSV và scope `kv` trước khi chạy job.
 - Job seed khai đủ fixed fields như phần Compute, không dùng `apply_policy_default_values` hay auto-termination.
-- Xác thực theo G0 #146: SQL auth + Entra admin; #14 phải triển khai SQL login trước nghiệm thu.
-  Không dùng endpoint Entra-only của spike để chạy job mật khẩu.
+- Server chính thức đã có SQL login `sqladmin` và secret `sql-admin-password` theo #14 và #24.
+  Nghiệm thu job cần kiểm kết nối bằng SQL login từ cluster dev.
