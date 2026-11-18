@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -407,3 +408,13 @@ def test_permanent_image_failure_is_cached_without_blocking_next_image(tmp_path)
         "failed": 0,
     }
     assert len(session.calls) == 2
+
+
+def test_python_task_entrypoint_accepts_exec_without_dunder_file(monkeypatch):
+    source = Path(__file__).parents[1] / "src/ingest/off_crawler.py"
+    monkeypatch.setattr(sys, "path", sys.path[:])
+    monkeypatch.setattr(sys, "argv", [str(source), "--help"])
+    with pytest.raises(SystemExit) as result:
+        exec(compile(source.read_text(), str(source), "exec"), {"__name__": "__main__"})
+    assert result.value.code == 0
+    assert sys.path[0] == str(source.resolve().parents[1])

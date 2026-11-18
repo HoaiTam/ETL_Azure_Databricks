@@ -1,6 +1,5 @@
 """Nạp CSV, CDC và OFF vào bronze. LDP quản lý checkpoint và schema store."""
 
-
 from pyspark import pipelines as dp
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F

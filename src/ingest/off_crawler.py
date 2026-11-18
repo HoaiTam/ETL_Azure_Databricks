@@ -289,5 +289,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    # Spark Python Task có thể gọi exec(compile(...)) mà không đặt __file__.
+    script_path = Path(globals().get("__file__", sys._getframe().f_code.co_filename))
+    sys.path.insert(0, str(script_path.resolve().parents[1]))
     main()
