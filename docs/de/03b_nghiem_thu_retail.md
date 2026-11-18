@@ -89,9 +89,35 @@ Structured Streaming dedup qua micro-batch có sự kiện đến muộn/replay.
 để kiểm wiring, thứ tự tạo target và rules. **Không** phải engine AUTO CDC: test không chứng minh
 Delta SCD2 tạo/đóng phiên bản, tombstone retention, SCD1 delete hoặc transaction trên workspace.
 
-Nghiệm thu dev còn chờ AD-DE-07 công bố Parquet và có hai bảng bronze CDC để chạy các bước
-trên. Chưa chạy validate/deploy, seed/ADF wave 1–3 hoặc query lịch sử thật. PR giữ draft, issue #47 mở chờ
-nghiệm thu G3; không dùng số dòng fixture để xác nhận ba phiên bản SCD2 trên cloud.
+## Kết quả nghiệm thu dev (2026-11-18)
+
+Bronze CDC thật từ AD-DE-07/AD-DE-09: snapshot wave 0 cùng các cửa sổ CDC wave 1–3.
+Bronze có đủ `_lsn`/`_seqval` dạng `0x` + 20 hex và 0 dòng rescue.
+
+- `bundle validate -t dev` đạt.
+- Update `0608ff6b-ea92-4fd6-b5d2-6c5811c37ced` COMPLETED.
+- Chạy lại cùng bronze, update `dc3621eb-caa4-422f-9cda-493593d5884d` COMPLETED, số liệu không đổi (bước 6).
+- `product_prices_history`:
+  - 54.656 dòng, bằng 49.688 snapshot cộng 4.968 thay đổi `_op=4`.
+  - 49.688 phiên bản mở, không `product_id` nào có hơn một phiên bản mở, 0 khoảng chồng nhau.
+  - 44.835 sản phẩm có 1 phiên bản, 4.738 có 2, 115 có 3.
+  - Ví dụ `product_id=194`, các khoảng liền nhau:
+
+    | Khoảng | Giá (USD) |
+    |---|---|
+    | 2015-01-01 → 2026-03-08 | 1.03 |
+    | 2026-03-08 → 2026-03-15 | 1.08 |
+    | 2026-03-15 → mở | 0.92 |
+
+- `promotions`:
+  - 3.810 dòng, bằng số `promo_id` có sự kiện cuối (theo LSN/seqval binary) khác delete.
+  - 0 promo có sự kiện cuối là delete còn ở silver (bước 5).
+- Hai bảng quarantine: 0 dòng.
+
+**Chưa nghiệm thu:**
+- Chưa đo state `dropDuplicates` (`numRowsTotal`, `memoryUsedBytes`).
+- Chưa thử dữ liệu xấu ở bước 7.
+- Chưa thử file công bố lặp ở bước 6.
 
 Tham khảo: [AUTO CDC](https://learn.microsoft.com/en-us/azure/databricks/ldp/cdc),
 [Python API](https://learn.microsoft.com/en-us/azure/databricks/ldp/developer/ldp-python-ref-apply-changes).
