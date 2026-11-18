@@ -5,6 +5,7 @@ on:
   pull_request:
     paths:
       - 'src/ingest/sql/**'
+      - 'src/ingest/seed_retail_db.py'
       - 'tests/sql/**'
       - 'scripts/check_retail_sql.py'
       - '.github/workflows/retail-sql-checks.yml'
@@ -23,5 +24,7 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
-      - name: Kiểm CDC và fallback trên database tạm
-        run: python3 scripts/check_retail_sql.py
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen --extra ingest --no-dev
+      - name: Kiểm CDC, fallback và seed trên database tạm
+        run: uv run --frozen --extra ingest --no-dev python scripts/check_retail_sql.py --seed

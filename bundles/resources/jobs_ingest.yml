@@ -1,0 +1,62 @@
+# Job chạy tay, không chạy cùng ADF/seed khác trên cùng retail_db.
+resources:
+  jobs:
+    seed_retail_db:
+      name: seed-retail-db
+      max_concurrent_runs: 1
+      timeout_seconds: 1800
+      tags:
+        owner: p2
+      parameters:
+        - name: wave
+          default: "0"
+        - name: seed
+          default: "42"
+        - name: source_mode
+          default: cdc
+        - name: server
+          default: ""
+        - name: database
+          default: retail_db
+        - name: user
+          default: sqladmin
+        - name: products_csv
+          default: /Volumes/${var.catalog}/landing_meta/raw/instacart/products/release=2017/products.csv
+      job_clusters:
+        - job_cluster_key: seed_cluster
+          new_cluster:
+            policy_id: ${var.policy_id}
+            spark_version: 15.4.x-scala2.12
+            node_type_id: ${var.node_type_id}
+            num_workers: 0
+            data_security_mode: SINGLE_USER
+            spark_conf:
+              spark.databricks.cluster.profile: singleNode
+              spark.master: local[*]
+            custom_tags:
+              owner: p2
+              ResourceClass: SingleNode
+      tasks:
+        - task_key: seed
+          job_cluster_key: seed_cluster
+          max_retries: 0
+          spark_python_task:
+            python_file: ../../src/ingest/seed_retail_db.py
+            parameters:
+              - --wave
+              - "{{job.parameters.wave}}"
+              - --seed
+              - "{{job.parameters.seed}}"
+              - --source-mode
+              - "{{job.parameters.source_mode}}"
+              - --server
+              - "{{job.parameters.server}}"
+              - --database
+              - "{{job.parameters.database}}"
+              - --user
+              - "{{job.parameters.user}}"
+              - --products-csv
+              - "{{job.parameters.products_csv}}"
+          libraries:
+            - pypi:
+                package: pymssql==2.4.6

@@ -151,7 +151,7 @@ retry cùng `(adf_run_id, capture_instance)` và nội dung là no-op, khác n�
 Chỉ gọi setter sau khi công bố landing và xóa staging thành công.
 
 **Spike free offer đã đạt (#8, PR #141):** P1 xác nhận CDC trên Azure SQL free offer.
-AD-DE-04 vẫn cần chạy nghiệm thu trên `retail_db` do #14 cấp; kết quả local không thay thế bước này.
+AD-DE-04 đã nghiệm thu trên `retail_db` do #14 cấp qua PR #140 ngày 2026-11-18.
 Nhánh §3.7 chỉ là dự phòng, không chạy cùng 02/03.
 
 LSN được truyền qua ADF dưới dạng **chuỗi hex cố định 22 ký tự** (`0x` + 20 chữ số hex). Chuỗi cùng độ dài thì so sánh theo thứ tự chữ cũng chính là so sánh theo số. Nhờ vậy ở silver có thể dùng chuỗi này trực tiếp trong `SEQUENCE BY`.
@@ -165,60 +165,23 @@ LSN được truyền qua ADF dưới dạng **chuỗi hex cố định 22 ký t
 | 0 | Insert giá cho 49.688 sản phẩm và khoảng 3.000 khuyến mãi | `2015-01-01` (giá từ đầu, phủ cả đơn prior xa nhất) |
 | k = 1..4 | Đổi giá khoảng 5% sản phẩm; thêm 300 khuyến mãi; gia hạn 50; **xóa** 30 (hủy khuyến mãi) | `2026-02-22 + 7·k ngày`, tức 01/03, 08/03, 15/03, 22/03, nằm trong cửa sổ replay 01–30/03 |
 
-```python
-# src/ingest/seed_retail_db.py  (rút gọn; chạy trong task Databricks hoặc local)
-import argparse, datetime as dt, random
-import pymssql   # %pip install pymssql
+Code thực thi ở [src/ingest/seed_retail_db.py](../../src/ingest/seed_retail_db.py),
+job riêng ở [jobs_ingest.yml](../../bundles/resources/jobs_ingest.yml);
+[hướng dẫn seed](../../src/ingest/README.md) ghi tham số, cách chạy và nghiệm thu.
 
-DEPT_PRICE = {4: (0.2, 4.0), 5: (8.0, 40.0), 7: (1.0, 6.0)}   # department_id -> (min, max); còn lại (1, 10)
-
-def connect(server: str, db: str, user: str, password: str):
-    return pymssql.connect(server=server, database=db, user=user, password=password, autocommit=False)
-
-def already_applied(cur, wave: int) -> bool:
-    cur.execute("IF OBJECT_ID('etl.seed_wave') IS NULL "
-                "CREATE TABLE etl.seed_wave(wave int PRIMARY KEY, applied_at datetime2 DEFAULT sysutcdatetime())")
-    cur.execute("SELECT 1 FROM etl.seed_wave WHERE wave = %d", (wave,))
-    return cur.fetchone() is not None
-
-def wave0(cur, products, rng):
-    ts = dt.datetime(2015, 1, 1)
-    rows = []
-    for pid, dept in products:
-        lo, hi = DEPT_PRICE.get(dept, (1.0, 10.0))
-        rows.append((pid, round(rng.uniform(lo, hi), 2), "USD", ts))
-    cur.executemany("INSERT INTO dbo.product_prices VALUES (%d, %s, %s, %s)", rows)
-    # ... insert promotions tương tự (promo_id P00001...)
-
-def wave_k(cur, k, products, rng):
-    ts = dt.datetime(2026, 2, 22) + dt.timedelta(days=7 * k)
-    changed = rng.sample([p for p, _ in products], k=len(products) // 20)
-    cur.executemany(
-        "UPDATE dbo.product_prices SET unit_price = ROUND(unit_price * %s, 2), updated_at = %s WHERE product_id = %d",
-        [(rng.choice([0.85, 0.9, 1.05, 1.1]), ts, pid) for pid in changed])
-    cur.execute("SELECT TOP 30 promo_id FROM dbo.promotions ORDER BY CHECKSUM(promo_id, %d)", (k,))
-    to_delete = [r[0] for r in cur.fetchall()]
-    cur.executemany("DELETE FROM dbo.promotions WHERE promo_id = %s", [(p,) for p in to_delete])
-    # ... insert 300 promotions mới, gia hạn end_date của 50 promotions
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--wave", type=int, required=True)
-    args = ap.parse_args()
-    rng = random.Random(42 + args.wave)          # cùng đợt → cùng dữ liệu trên máy 4 người
-    conn = connect(*get_conn_params())           # đọc từ secret scope `kv` (Databricks) hoặc biến môi trường
-    cur = conn.cursor()
-    if already_applied(cur, args.wave):
-        print(f"wave {args.wave} đã áp dụng, bỏ qua"); return
-    products = load_products()                   # product_id, department_id từ products.csv
-    (wave0 if args.wave == 0 else lambda c, p, r: wave_k(c, args.wave, p, r))(cur, products, rng)
-    cur.execute("INSERT INTO etl.seed_wave(wave) VALUES (%d)", (args.wave,))
-    conn.commit()                                # một transaction cho cả đợt: lỗi giữa chừng → rollback hết
-```
-
-**Chạy lại an toàn** nhờ hai điểm:
-- Cả đợt nằm trong **một transaction**: lỗi giữa chừng thì rollback toàn bộ, không có nửa đợt.
-- Bảng `etl.seed_wave` ngăn áp dụng một đợt hai lần.
+- `generate_wave()` là hàm thuần, dùng `Random(42 + wave)` trên danh mục sắp theo khóa;
+  giá dùng Decimal, mã khuyến mãi không tái dùng, chọn hủy/gia hạn từ các chương trình chưa hủy.
+- `apply_wave()` lấy application lock theo transaction, kiểm các wave trước,
+  ghi toàn bộ thay đổi và marker `etl.seed_wave` trong một transaction. Lô 500 câu chỉ giảm số lần gửi SQL,
+  **không commit giữa lô**; lỗi giữa đợt rollback cả giá, khuyến mãi và marker.
+- Retry cùng danh mục/seed/kế hoạch/chế độ là no-op, in `wave N đã áp dụng, bỏ qua`;
+  đổi fingerprint bị từ chối. Wave 0 không tự ghi đè nguồn có dữ liệu khi chưa có marker.
+- Đường chạy Databricks đọc mật khẩu bằng `dbutils.secrets.get("kv", "sql-admin-password")`, không đọc env/file.
+- Job chạy tay, một run, cluster theo policy `instacart-single-node`; không chạy cùng ADF.
+  CDC hủy khuyến mãi bằng DELETE; nhánh §3.7 dùng `is_deleted` và thời gian wave.
+- `--dry-run` kiểm kế hoạch trên CSV thật mà không kết nối SQL/Spark hoặc đọc secret.
+  Regression Docker kiểm đủ 5 wave trên 49.688 mã tự dựng, gồm CDC, rollback và chạy đồng thời.
+  AD-DE-04 và AD-OPS-22 đã hoàn tất. Nghiệm thu seed còn chờ CSV landing của AD-DE-06 hoặc bản danh mục thật đã cấp trên volume.
 
 ### 3.5 ADF pipeline `pl_ingest_retail_db`
 
