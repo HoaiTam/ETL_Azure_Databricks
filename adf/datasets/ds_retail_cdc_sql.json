@@ -1,0 +1,10 @@
+{
+  "name": "ds_retail_cdc_sql",
+  "properties": {
+    "type": "AzureSqlTable",
+    "linkedServiceName": {
+      "referenceName": "ls_sql_retail",
+      "type": "LinkedServiceReference"
+    }
+  }
+}

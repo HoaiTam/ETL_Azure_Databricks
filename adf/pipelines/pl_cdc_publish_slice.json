@@ -1,0 +1,240 @@
+[
+  {
+    "name": "reject_invalid_slice",
+    "type": "IfCondition",
+    "typeProperties": {
+      "expression": {
+        "type": "Expression",
+        "value": "@not(and(or(equals(pipeline().parameters.ci, 'dbo_product_prices'), equals(pipeline().parameters.ci, 'dbo_promotions')), and(and(equals(uriComponent(replace(pipeline().parameters.slice, '=', '')), replace(pipeline().parameters.slice, '=', '')), or(and(startsWith(pipeline().parameters.slice, 'snapshot=0x'), equals(length(pipeline().parameters.slice), 31)), and(startsWith(pipeline().parameters.slice, 'window=0x'), equals(length(pipeline().parameters.slice), 52)))), and(greaterOrEquals(int(pipeline().parameters.rows_read), 0), equals(int(pipeline().parameters.rows_read), int(pipeline().parameters.rows_copied))))))"
+      },
+      "ifTrueActivities": [
+        {
+          "name": "bad_publish_input",
+          "type": "Fail",
+          "typeProperties": {
+            "errorCode": "RetailCdcContract",
+            "message": "Sai bảng, phân đoạn LSN hoặc số dòng Copy không khớp."
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "get_staged_file",
+    "type": "GetMetadata",
+    "typeProperties": {
+      "dataset": {
+        "referenceName": "ds_retail_cdc_binary",
+        "type": "DatasetReference",
+        "parameters": {
+          "folder_path": {
+            "type": "Expression",
+            "value": "@concat('_staging/retail_db/', json('{\"dbo_product_prices\":\"product_prices\",\"dbo_promotions\":\"promotions\"}')[pipeline().parameters.ci], '/', pipeline().parameters.slice)"
+          },
+          "file_name": "part-00000.parquet"
+        }
+      },
+      "fieldList": [
+        "exists"
+      ],
+      "storeSettings": {
+        "type": "AzureBlobFSReadSettings"
+      }
+    },
+    "dependsOn": [
+      {
+        "activity": "reject_invalid_slice",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ],
+    "policy": {
+      "timeout": "0.01:00:00",
+      "retry": 2,
+      "retryIntervalInSeconds": 30
+    }
+  },
+  {
+    "name": "publish_if_staged",
+    "type": "IfCondition",
+    "typeProperties": {
+      "expression": {
+        "type": "Expression",
+        "value": "@and(greater(int(pipeline().parameters.rows_copied), 0), activity('get_staged_file').output.exists)"
+      },
+      "ifTrueActivities": [
+        {
+          "name": "publish_parquet",
+          "type": "Copy",
+          "typeProperties": {
+            "source": {
+              "type": "BinarySource",
+              "storeSettings": {
+                "type": "AzureBlobFSReadSettings"
+              }
+            },
+            "sink": {
+              "type": "BinarySink",
+              "storeSettings": {
+                "type": "AzureBlobFSWriteSettings",
+                "copyBehavior": "PreserveHierarchy"
+              }
+            },
+            "enableStaging": false,
+            "validateDataConsistency": true
+          },
+          "inputs": [
+            {
+              "referenceName": "ds_retail_cdc_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "folder_path": {
+                  "type": "Expression",
+                  "value": "@concat('_staging/retail_db/', json('{\"dbo_product_prices\":\"product_prices\",\"dbo_promotions\":\"promotions\"}')[pipeline().parameters.ci], '/', pipeline().parameters.slice)"
+                },
+                "file_name": "part-00000.parquet"
+              }
+            }
+          ],
+          "outputs": [
+            {
+              "referenceName": "ds_retail_cdc_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "folder_path": {
+                  "type": "Expression",
+                  "value": "@concat('retail_db/', json('{\"dbo_product_prices\":\"product_prices\",\"dbo_promotions\":\"promotions\"}')[pipeline().parameters.ci], '/', pipeline().parameters.slice)"
+                },
+                "file_name": "part-00000.parquet"
+              }
+            }
+          ],
+          "policy": {
+            "timeout": "0.01:00:00",
+            "retry": 2,
+            "retryIntervalInSeconds": 30
+          }
+        }
+      ]
+    },
+    "dependsOn": [
+      {
+        "activity": "get_staged_file",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "get_published_file",
+    "type": "GetMetadata",
+    "typeProperties": {
+      "dataset": {
+        "referenceName": "ds_retail_cdc_binary",
+        "type": "DatasetReference",
+        "parameters": {
+          "folder_path": {
+            "type": "Expression",
+            "value": "@concat('retail_db/', json('{\"dbo_product_prices\":\"product_prices\",\"dbo_promotions\":\"promotions\"}')[pipeline().parameters.ci], '/', pipeline().parameters.slice)"
+          },
+          "file_name": "part-00000.parquet"
+        }
+      },
+      "fieldList": [
+        "exists"
+      ],
+      "storeSettings": {
+        "type": "AzureBlobFSReadSettings"
+      }
+    },
+    "dependsOn": [
+      {
+        "activity": "publish_if_staged",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ],
+    "policy": {
+      "timeout": "0.01:00:00",
+      "retry": 2,
+      "retryIntervalInSeconds": 30
+    }
+  },
+  {
+    "name": "require_published_file",
+    "type": "IfCondition",
+    "typeProperties": {
+      "expression": {
+        "type": "Expression",
+        "value": "@and(greater(int(pipeline().parameters.rows_copied), 0), not(activity('get_published_file').output.exists))"
+      },
+      "ifTrueActivities": [
+        {
+          "name": "missing_published_file",
+          "type": "Fail",
+          "typeProperties": {
+            "errorCode": "RetailCdcContract",
+            "message": "Copy có dòng nhưng không tìm thấy Parquet ở landing."
+          }
+        }
+      ]
+    },
+    "dependsOn": [
+      {
+        "activity": "get_published_file",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "clean_staged_file",
+    "type": "IfCondition",
+    "typeProperties": {
+      "expression": {
+        "type": "Expression",
+        "value": "@activity('get_staged_file').output.exists"
+      },
+      "ifTrueActivities": [
+        {
+          "name": "delete_staged_parquet",
+          "type": "Delete",
+          "typeProperties": {
+            "dataset": {
+              "referenceName": "ds_retail_cdc_binary",
+              "type": "DatasetReference",
+              "parameters": {
+                "folder_path": {
+                  "type": "Expression",
+                  "value": "@concat('_staging/retail_db/', json('{\"dbo_product_prices\":\"product_prices\",\"dbo_promotions\":\"promotions\"}')[pipeline().parameters.ci], '/', pipeline().parameters.slice)"
+                },
+                "file_name": "part-00000.parquet"
+              }
+            },
+            "storeSettings": {
+              "type": "AzureBlobFSReadSettings",
+              "recursive": false
+            }
+          },
+          "policy": {
+            "timeout": "0.01:00:00",
+            "retry": 0,
+            "retryIntervalInSeconds": 30
+          }
+        }
+      ]
+    },
+    "dependsOn": [
+      {
+        "activity": "require_published_file",
+        "dependencyConditions": [
+          "Succeeded"
+        ]
+      }
+    ]
+  }
+]

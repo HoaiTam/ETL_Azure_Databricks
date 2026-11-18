@@ -403,6 +403,15 @@ Bộ mô phỏng local chỉ hỗ trợ dependency Succeeded và tập biểu th
 - [ ] Chạy hai lần liên tiếp không seed: lần hai mode = empty, không có thư mục mới
 - [ ] Bắn lỗi rồi rerun: watermark không đổi trước khi sửa, không mất thay đổi
 
+**Kết quả chuẩn bị AD-DE-07**
+
+- Đã dựng ba pipeline, settings và dataset SQL/Parquet/Binary. `pl_cdc_publish_slice` kiểm số dòng,
+  công bố và dọn staging trước khi pipeline con ghi watermark của bảng. Hướng dẫn ở
+  [ADF retail CDC](../../adf/README_RETAIL_CDC.md).
+- Kiểm JSON bằng Azure SDK và mô phỏng local các tuyến snapshot, window, empty, cửa sổ 0 dòng,
+  lỗi giữa chừng và phục hồi. Giữ các ô nghiệm thu Azure chưa tick cho đến khi có kết quả thật.
+- AD-DE-04 (#40) đã nghiệm thu. Còn chờ seed AD-DE-05 (#41) và linked service/dataset AD-OPS-25 (#27).
+
 ### AD-DE-08
 
 **Khai báo pipeline instacart_batch trong DAB với schema dev riêng**

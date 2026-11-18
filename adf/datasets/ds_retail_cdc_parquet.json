@@ -1,0 +1,33 @@
+{
+  "name": "ds_retail_cdc_parquet",
+  "properties": {
+    "type": "Parquet",
+    "linkedServiceName": {
+      "referenceName": "ls_adls",
+      "type": "LinkedServiceReference"
+    },
+    "parameters": {
+      "folder_path": {
+        "type": "String"
+      },
+      "file_name": {
+        "type": "String"
+      }
+    },
+    "typeProperties": {
+      "location": {
+        "type": "AzureBlobFSLocation",
+        "fileSystem": "landing",
+        "folderPath": {
+          "type": "Expression",
+          "value": "@dataset().folder_path"
+        },
+        "fileName": {
+          "type": "Expression",
+          "value": "@dataset().file_name"
+        }
+      },
+      "compressionCodec": "snappy"
+    }
+  }
+}
