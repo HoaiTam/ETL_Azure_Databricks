@@ -363,7 +363,32 @@ File gốc để sửa: [product_enrichment_join.drawio](product_enrichment_join
 | Organic Strawberries                 | Yaourt fraise biologique (sữa chua Pháp) | Sai                      |
 | Bag of Organic Bananas               | Plastic Bag                                | Sai                      |
 
-Tỉ lệ khớp thực tế **chưa đo**, cần làm trong giai đoạn spike. Tỉ lệ thấp vẫn chấp nhận được, miễn là báo cáo trung thực.
+#### Đo trên dev
+
+Ngày 2026-11-19, trên lô dev gồm 305 sản phẩm đã crawl, có **279 sản phẩm** với ít nhất một ứng viên Mỹ.
+Commit đo là `508a8a4`. [Update batch dev](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/55bda8da-ae3f-4a14-be01-028193fdf91d) hoàn tất với `enable_off=true`.
+
+| Nhãn | Toàn bridge (49.688) | Tỷ lệ | Đã crawl và có ứng viên Mỹ (279) | Tỷ lệ |
+|---|---:|---:|---:|---:|
+| `matched` | 259 | 0,5213% | 259 | 92,8315% |
+| `low_confidence` | 8 | 0,0161% | 8 | 2,8674% |
+| `no_match` | 49.421 | 99,4626% | 12 | 4,3011% |
+
+Bridge có **49.688 dòng / 49.688 khóa**. Số khóa bằng `bronze.products`.
+`off_products_clean` có **1.525 dòng** và `quarantine_off_products` có **0 dòng**.
+
+Bảng cầu nối giữ **một dòng cho mỗi `product_id` Instacart**, kể cả chưa crawl/chỉ có hit ngoài Mỹ:
+những sản phẩm đó nhận `off_code=NULL`, `off_match_score=0`, `off_match_status=no_match`.
+Ứng viên dưới 70 vẫn giữ mã/điểm với nhãn `no_match` để kiểm tra. Khi bằng điểm, chọn mã OFF tăng dần.
+Ngưỡng 85/70 áp dụng trên điểm DOUBLE chưa làm tròn. Bonus 5 điểm chỉ dùng thương hiệu đầu tiên
+xuất hiện nguyên cụm từ trong tên Instacart, chặn trên 100; tên chuẩn hóa rỗng luôn nhận 0.
+
+Khi có dữ liệu thật, ghi **đủ ba nhãn** (`matched`, `low_confidence`, `no_match`, kể cả nhãn có 0 dòng)
+và tỉ lệ với mẫu số là **toàn bộ bảng cầu nối** (49.688 sản phẩm nếu dùng release đầy đủ).
+Báo riêng số sản phẩm đã crawl/đủ ứng viên Mỹ để phân biệt độ phủ crawler với chất lượng ghép;
+không suy ra `no_match` nghĩa là đã tra nhưng không thấy. Lưu commit, pipeline/update ID,
+nguồn bronze/phiên bản và thời điểm đo. Hướng dẫn lấy số và đối soát tại
+[nghiệm thu OFF](../de/03d_nghiem_thu_off.md). Tỉ lệ thấp vẫn chấp nhận được nếu báo cáo trung thực.
 
 ### 5.7 Làm giàu được những gì
 
@@ -396,6 +421,53 @@ Tỉ lệ khớp thực tế **chưa đo**, cần làm trong giai đoạn spike.
 | `silver.dim_product`       | `products` + `aisles` + `departments` + giá + khuyến mãi + OFF   | Danh mục sản phẩm đã làm giàu                                        |
 | `silver.baskets`           | `order_items` gom theo đơn                                        | Đầu vào phần DS: `split = prior` để train, `holdout` để đánh giá |
 | `silver.quarantine_*`      | Bản ghi vi phạm luật chất lượng dữ liệu (mỗi nguồn một bảng) | Lưu lỗi kèm lý do (`_dq_failed`), không xóa im lặng                  |
+
+### 6.1 Hợp đồng `silver.dim_product` (AD-DE-14)
+
+Một dòng mỗi `product_id` Instacart; release đầy đủ có 49.688 sản phẩm. Thiếu nguồn làm giàu
+vẫn giữ sản phẩm nhờ LEFT JOIN. Cột chính:
+
+| Nhóm | Cột / ý nghĩa |
+|---|---|
+| Danh mục | `product_id`, `product_name`, `aisle_id`, `aisle`, `department_id`, `department` |
+| Giá | `current_price` DECIMAL(10,2), `currency` từ hàng SCD2 `__END_AT IS NULL`; thiếu thì NULL |
+| Khuyến mãi | `discount_pct` lớn nhất trong các chương trình phủ `as_of_date`; `on_promotion` BOOL; không có thì NULL/false |
+| Độ tin cậy OFF | `off_match_score`, `off_match_status` giữ cả matched/low_confidence/no_match; thiếu bridge thành 0/no_match |
+| OFF tin cậy | `off_code`, `off_product_name`, `brand`, `off_categories`, `countries_tags`, `nutriscore_grade`, `nova_group`, `energy_kcal_100g`, `sugars_100g`, `fat_100g`, `image_url` — chỉ làm giàu khi matched |
+| Ảnh | `image_path` từ metadata ảnh của barcode đã matched; thiếu/không matched thì NULL |
+| Kỹ thuật | `dup_cnt` = 1 và `_join_sources_unique` = true khi update thành công; không dùng làm measure BI |
+
+OFF ghép theo cặp product_id/off_code; cùng barcode không cho phép lấy payload của sản phẩm khác.
+Giá là giá **hiện hành**, không phải giá lịch sử tại ngày đặt đơn; xem AD-DE-22 cho join theo thời điểm.
+Ngày cấu hình chỉ quyết định khuyến mãi; khuyến mãi 0% vẫn có on_promotion=true.
+
+Đã nghiệm thu trên dev với **49.688 dòng và 49.688 khóa** ở cả hai chế độ. Khi OFF tắt,
+mọi thuộc tính OFF/ảnh là NULL, trạng thái là `no_match` và điểm bằng 0.
+Số đo `has_price` và update ID:
+[nghiệm thu dim_product](../de/03e_nghiem_thu_dim_product.md).
+
+Guard của `silver.dim_product`: `dup_cnt` là số dòng sau join cho mỗi product_id,
+`_join_sources_unique` kiểm trùng nguồn giá/OFF/bridge, `_catalog_sources_unique`
+cảnh báo nhiều payload CSV trong nhóm được ưu tiên, và `_catalog_sources_unrescued` cảnh báo
+khi phiên bản danh mục được chọn có rescue.
+
+### 6.2 View hợp nhất và `silver.baskets` (AD-DE-15)
+
+`silver.orders` có order_id, user_id, eval_set, order_number, order_dow, order_hour_of_day,
+days_since_prior_order, order_ts_sim, source và is_test. Batch giữ prior/test; stream đổi event_time
+thành order_ts_sim và gắn train/stream/is_test=false. `silver.order_items` có order_id, product_id,
+add_to_cart_order, reordered, source. Cả hai UNION ALL, không tự khử trùng hay tạo bản train batch.
+
+Baskets có năm cột nghiệp vụ. `order_id INT` là khóa, `user_id INT` là mã khách,
+`split` nhận `prior` hoặc `holdout`, `items ARRAY<INT>` chứa mã sản phẩm duy nhất theo thứ tự tăng dần,
+và `n_items INT = size(items)` đếm số sản phẩm khác nhau. Header test không tạo giỏ.
+`_items_valid` kiểm tính hợp lệ của mã sản phẩm, `_source_disjoint` kiểm mã đơn holdout không xuất hiện
+ở batch, còn `dup_cnt` đếm giỏ theo mã đơn. Ba cột kỹ thuật phục vụ kiểm chất lượng.
+Header holdout đang chờ món được cảnh báo riêng. Snapshot AD-DE-20 kiểm miền số trước khi cast về INT.
+
+Mục tiêu full release sau khi phát đủ stream là **3.214.874 giỏ prior** và **131.209 giỏ holdout**.
+Còn chờ AD-ST-05 (#68) để chạy hai view trên warehouse và đối soát số giỏ thật theo
+[runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md).
 
 ## 7. Dữ liệu cho Data Science
 
