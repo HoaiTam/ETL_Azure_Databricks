@@ -23,6 +23,8 @@ def spark() -> SparkSession:
         .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
         .config("spark.databricks.delta.snapshotPartitions", "1")
         .config("spark.jars.ivySettings", (Path(__file__).parent / "fixtures/ivysettings.xml").resolve().as_uri())
+        # pytest.pythonpath chỉ áp dụng driver; pandas UDF còn import common trên worker.
+        .config("spark.executorEnv.PYTHONPATH", str(Path(__file__).resolve().parents[1] / "src"))
     )
     session = configure_spark_with_delta_pip(builder).getOrCreate()
     yield session

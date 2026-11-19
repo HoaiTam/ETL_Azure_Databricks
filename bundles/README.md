@@ -92,6 +92,12 @@ Quyền đọc event log cho vai khác vẫn theo AD-OPS-20; không tự mở r�
 Xem kết quả validate, deploy, smoke update và đọc event log trên [issue AD-DE-08](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/44).
 Smoke update kiểm đường chạy của pipeline và event log. Đối soát dữ liệu ETL thực hiện ở các task bronze, silver và gold.
 
+AD-DE-13 bổ sung notebook `src/pipelines/batch/silver_off.py` được glob hiện tại nạp:
+`off_products_clean`, `product_off_match` và quarantine trong schema silver đã resolve.
+Notebook cài RapidFuzz ở ô đầu; không thêm cluster/job. Cách lấy số thật và nghiệm thu:
+[03d_nghiem_thu_off.md](../docs/de/03d_nghiem_thu_off.md). Số đo theo nhóm nằm ở
+[data dictionary §5.6](../docs/data/data_dictionary.md#56-cách-join-ghép-theo-tên-qua-bảng-cầu-nối).
+
 AD-DE-16 có `src/tasks/collect_dq.sql`, nhận catalog/ops_schema/event_log_table/update_id,
 thu batch hoặc stream vào cùng bảng Delta `ops.dq_results`. Task chạy trên warehouse serverless,
 do AD-DE-18 tích hợp điều phối sau; không tạo job/cluster trong thay đổi này.

@@ -363,7 +363,32 @@ File gốc để sửa: [product_enrichment_join.drawio](product_enrichment_join
 | Organic Strawberries                 | Yaourt fraise biologique (sữa chua Pháp) | Sai                      |
 | Bag of Organic Bananas               | Plastic Bag                                | Sai                      |
 
-Tỉ lệ khớp thực tế **chưa đo**, cần làm trong giai đoạn spike. Tỉ lệ thấp vẫn chấp nhận được, miễn là báo cáo trung thực.
+#### Đo trên dev
+
+Ngày 2026-11-19, trên lô dev gồm 305 sản phẩm đã crawl, có **279 sản phẩm** với ít nhất một ứng viên Mỹ.
+Commit đo là `508a8a4`. [Update batch dev](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/55bda8da-ae3f-4a14-be01-028193fdf91d) hoàn tất với `enable_off=true`.
+
+| Nhãn | Toàn bridge (49.688) | Tỷ lệ | Đã crawl và có ứng viên Mỹ (279) | Tỷ lệ |
+|---|---:|---:|---:|---:|
+| `matched` | 259 | 0,5213% | 259 | 92,8315% |
+| `low_confidence` | 8 | 0,0161% | 8 | 2,8674% |
+| `no_match` | 49.421 | 99,4626% | 12 | 4,3011% |
+
+Bridge có **49.688 dòng / 49.688 khóa**. Số khóa bằng `bronze.products`.
+`off_products_clean` có **1.525 dòng** và `quarantine_off_products` có **0 dòng**.
+
+Bảng cầu nối giữ **một dòng cho mỗi `product_id` Instacart**, kể cả chưa crawl/chỉ có hit ngoài Mỹ:
+những sản phẩm đó nhận `off_code=NULL`, `off_match_score=0`, `off_match_status=no_match`.
+Ứng viên dưới 70 vẫn giữ mã/điểm với nhãn `no_match` để kiểm tra. Khi bằng điểm, chọn mã OFF tăng dần.
+Ngưỡng 85/70 áp dụng trên điểm DOUBLE chưa làm tròn. Bonus 5 điểm chỉ dùng thương hiệu đầu tiên
+xuất hiện nguyên cụm từ trong tên Instacart, chặn trên 100; tên chuẩn hóa rỗng luôn nhận 0.
+
+Khi có dữ liệu thật, ghi **đủ ba nhãn** (`matched`, `low_confidence`, `no_match`, kể cả nhãn có 0 dòng)
+và tỉ lệ với mẫu số là **toàn bộ bảng cầu nối** (49.688 sản phẩm nếu dùng release đầy đủ).
+Báo riêng số sản phẩm đã crawl/đủ ứng viên Mỹ để phân biệt độ phủ crawler với chất lượng ghép;
+không suy ra `no_match` nghĩa là đã tra nhưng không thấy. Lưu commit, pipeline/update ID,
+nguồn bronze/phiên bản và thời điểm đo. Hướng dẫn lấy số và đối soát tại
+[nghiệm thu OFF](../de/03d_nghiem_thu_off.md). Tỉ lệ thấp vẫn chấp nhận được nếu báo cáo trung thực.
 
 ### 5.7 Làm giàu được những gì
 
