@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pandas as pd
 import pytest
+from pyspark import cloudpickle
 from pyspark.sql import functions as F
 from rapidfuzz import fuzz
 
+from common import off, text
 from common.off import (
     MATCH_RULES,
     assess_off,
@@ -207,8 +211,9 @@ def test_statistics_always_include_three_labels_and_all_product_denominator(spar
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch, enabled):
+def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch, tmp_path, enabled):
     definitions = {}
+    previous_registry = cloudpickle.list_registry_pickle_by_value()
 
     def mv(**options):
         def wrap(function):
@@ -251,6 +256,28 @@ def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch, enabl
             assert not hasattr(module, "match_score")
             return
         assert module.score_series is score_series
+        env = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                """
+import importlib.util
+import sys
+import pandas as pd
+from pyspark import cloudpickle
+
+assert importlib.util.find_spec("common") is None
+scorer = cloudpickle.loads(sys.stdin.buffer.read())
+result = scorer(pd.Series(["Organic Banana"]), pd.Series(["Fresh Banana"]), pd.Series([""]))
+assert result.tolist() == [100.0]
+""",
+            ],
+            input=cloudpickle.dumps(module.score_series),
+            cwd=tmp_path,
+            env=env,
+            check=True,
+        )
         assert set(definitions) == {
             f"`test-catalog`.`p2_silver`.`{name}`"
             for name in ["off_products_clean", "product_off_match", "quarantine_off_products"]
@@ -270,6 +297,10 @@ def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch, enabl
         assert [r.off_match_status for r in actual] == ["matched", "no_match"]
         assert module.quarantine_off_products().count() == 0
     finally:
+        for dependency in (off, text):
+            name = dependency.__name__
+            if name not in previous_registry and name in cloudpickle.list_registry_pickle_by_value():
+                cloudpickle.unregister_pickle_by_value(dependency)
         for key, value in old.items():
             if value is None:
                 spark.conf.unset(key)

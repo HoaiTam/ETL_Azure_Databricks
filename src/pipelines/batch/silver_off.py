@@ -6,9 +6,11 @@
 """OFF và bảng cầu nối tên; dim_product được triển khai riêng ở AD-DE-14."""
 
 from pyspark import pipelines as dp
+from pyspark.cloudpickle import register_pickle_by_value
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+from common import off, text
 from common.off import (
     MATCH_RULES,
     assess_off,
@@ -29,6 +31,9 @@ def table_name(schema: str, name: str) -> str:
 
 
 if spark.conf.get("enable_off", "false").lower() == "true":
+    # Worker có RapidFuzz từ môi trường pipeline, nhưng có thể không import được src/common.
+    register_pickle_by_value(off)
+    register_pickle_by_value(text)
     match_score = F.pandas_udf(score_series, "double")
 
     @dp.materialized_view(
