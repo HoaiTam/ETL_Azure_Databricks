@@ -98,6 +98,11 @@ Notebook cài RapidFuzz ở ô đầu; không thêm cluster/job. Cách lấy s�
 [03d_nghiem_thu_off.md](../docs/de/03d_nghiem_thu_off.md). Số đo theo nhóm nằm ở
 [data dictionary §5.6](../docs/data/data_dictionary.md#56-cách-join-ghép-theo-tên-qua-bảng-cầu-nối).
 
+AD-DE-14 luôn đăng ký MV `dim_product` và chỉ đọc ba nguồn OFF khi bật `enable_off`. MV dùng
+`as_of_date` để chọn khuyến mãi. Giá hiện hành lấy từ SCD2, OFF/ảnh chỉ dùng matched, có fail guard
+cho fanout và xung đột nguồn. Không thêm cluster/job. Cách đối soát 49.688 khóa và coverage giá thật:
+[03e_nghiem_thu_dim_product.md](../docs/de/03e_nghiem_thu_dim_product.md). Đã kiểm trên dev với OFF tắt và bật.
+
 AD-DE-16 có `src/tasks/collect_dq.sql`, nhận catalog/ops_schema/event_log_table/update_id,
 thu batch hoặc stream vào cùng bảng Delta `ops.dq_results`. Task chạy trên warehouse serverless,
 do AD-DE-18 tích hợp điều phối sau; không tạo job/cluster trong thay đổi này.

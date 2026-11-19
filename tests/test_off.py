@@ -234,7 +234,9 @@ def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch, tmp_p
         "pyspark.pipelines",
         SimpleNamespace(
             materialized_view=mv,
+            temporary_view=mv,
             expect=expect,
+            expect_or_fail=expect,
             expect_all_or_fail=expect_all_or_fail,
         ),
     )
@@ -252,7 +254,7 @@ def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch, tmp_p
         source = ROOT / "src/pipelines/batch/silver_off.py"
         exec(compile(source.read_text(), str(source), "exec"), module.__dict__)
         if not enabled:
-            assert not definitions
+            assert set(definitions) == {module.table_name("p2_silver", "dim_product"), "catalog_products_assessed"}
             assert not hasattr(module, "match_score")
             return
         assert module.score_series is score_series
@@ -278,20 +280,20 @@ assert result.tolist() == [100.0]
             env=env,
             check=True,
         )
-        assert set(definitions) == {
-            f"`test-catalog`.`p2_silver`.`{name}`"
-            for name in ["off_products_clean", "product_off_match", "quarantine_off_products"]
-        }
+        names = ["off_products_clean", "product_off_match", "quarantine_off_products", "dim_product"]
+        expected = {module.table_name("p2_silver", name) for name in names}
+        assert set(definitions) == expected | {"catalog_products_assessed"}
         for name in ["off_products_clean", "product_off_match"]:
             assert definitions[module.table_name("p2_silver", name)][1]["cluster_by"] == ["product_id"]
 
         tables = {
             module.table_name("p2_bronze", "products"): spark.createDataFrame(
-                [(1, "Banana"), (2, "Tea")], "product_id INT, product_name STRING"
+                [(1, "Banana", None), (2, "Tea", "bad")], "product_id INT, product_name STRING, _rescued_data STRING"
             ),
             module.table_name("p2_bronze", "off_products"): frame(spark, [hit()]),
         }
         module.spark = SimpleNamespace(read=SimpleNamespace(table=lambda name: tables[name]))
+        tables["catalog_products_assessed"] = module.catalog_products_assessed()
         tables[module.table_name("p2_silver", "off_products_clean")] = module.off_products_clean()
         actual = module.product_off_match().orderBy("product_id").collect()
         assert [r.off_match_status for r in actual] == ["matched", "no_match"]

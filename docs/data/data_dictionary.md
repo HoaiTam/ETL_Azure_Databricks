@@ -422,6 +422,35 @@ nguồn bronze/phiên bản và thời điểm đo. Hướng dẫn lấy số v�
 | `silver.baskets`           | `order_items` gom theo đơn                                        | Đầu vào phần DS: `split = prior` để train, `holdout` để đánh giá |
 | `silver.quarantine_*`      | Bản ghi vi phạm luật chất lượng dữ liệu (mỗi nguồn một bảng) | Lưu lỗi kèm lý do (`_dq_failed`), không xóa im lặng                  |
 
+### 6.1 Hợp đồng `silver.dim_product` (AD-DE-14)
+
+Một dòng mỗi `product_id` Instacart; release đầy đủ có 49.688 sản phẩm. Thiếu nguồn làm giàu
+vẫn giữ sản phẩm nhờ LEFT JOIN. Cột chính:
+
+| Nhóm | Cột / ý nghĩa |
+|---|---|
+| Danh mục | `product_id`, `product_name`, `aisle_id`, `aisle`, `department_id`, `department` |
+| Giá | `current_price` DECIMAL(10,2), `currency` từ hàng SCD2 `__END_AT IS NULL`; thiếu thì NULL |
+| Khuyến mãi | `discount_pct` lớn nhất trong các chương trình phủ `as_of_date`; `on_promotion` BOOL; không có thì NULL/false |
+| Độ tin cậy OFF | `off_match_score`, `off_match_status` giữ cả matched/low_confidence/no_match; thiếu bridge thành 0/no_match |
+| OFF tin cậy | `off_code`, `off_product_name`, `brand`, `off_categories`, `countries_tags`, `nutriscore_grade`, `nova_group`, `energy_kcal_100g`, `sugars_100g`, `fat_100g`, `image_url` — chỉ làm giàu khi matched |
+| Ảnh | `image_path` từ metadata ảnh của barcode đã matched; thiếu/không matched thì NULL |
+| Kỹ thuật | `dup_cnt` = 1 và `_join_sources_unique` = true khi update thành công; không dùng làm measure BI |
+
+OFF ghép theo cặp product_id/off_code; cùng barcode không cho phép lấy payload của sản phẩm khác.
+Giá là giá **hiện hành**, không phải giá lịch sử tại ngày đặt đơn; xem AD-DE-22 cho join theo thời điểm.
+Ngày cấu hình chỉ quyết định khuyến mãi; khuyến mãi 0% vẫn có on_promotion=true.
+
+Đã nghiệm thu trên dev với **49.688 dòng và 49.688 khóa** ở cả hai chế độ. Khi OFF tắt,
+mọi thuộc tính OFF/ảnh là NULL, trạng thái là `no_match` và điểm bằng 0.
+Số đo `has_price` và update ID:
+[nghiệm thu dim_product](../de/03e_nghiem_thu_dim_product.md).
+
+Guard của `silver.dim_product`: `dup_cnt` là số dòng sau join cho mỗi product_id,
+`_join_sources_unique` kiểm trùng nguồn giá/OFF/bridge, `_catalog_sources_unique`
+cảnh báo nhiều payload CSV trong nhóm được ưu tiên, và `_catalog_sources_unrescued` cảnh báo
+khi phiên bản danh mục được chọn có rescue.
+
 ### 6.2 View hợp nhất và `silver.baskets` (AD-DE-15)
 
 `silver.orders` có order_id, user_id, eval_set, order_number, order_dow, order_hour_of_day,
