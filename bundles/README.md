@@ -103,6 +103,13 @@ AD-DE-14 luôn đăng ký MV `dim_product` và chỉ đọc ba nguồn OFF khi b
 cho fanout và xung đột nguồn. Không thêm cluster/job. Cách đối soát 49.688 khóa và coverage giá thật:
 [03e_nghiem_thu_dim_product.md](../docs/de/03e_nghiem_thu_dim_product.md). Đã kiểm trên dev với OFF tắt và bật.
 
+AD-DE-16 có `src/tasks/collect_dq.sql`, nhận catalog/ops_schema/event_log_table/update_id,
+thu batch hoặc stream vào cùng bảng Delta `ops.dq_results`. Task chạy trên warehouse serverless,
+do AD-DE-18 tích hợp điều phối sau; không tạo job/cluster trong thay đổi này.
+Hợp đồng counters, khóa có dataset và cách nghiệm thu chạy hai lần/quarantine:
+[06b_nghiem_thu_dq.md](../docs/de/06b_nghiem_thu_dq.md). Đã kiểm batch trên warehouse dev với
+47 khóa expectation và bốn bảng quarantine. Còn chờ event log stream.
+
 AD-DE-15 thêm `baskets` và views UC hợp nhất. Mặc định `enable_baskets=false`; chỉ bật
 khi hai bảng stream tồn tại đúng schema. Xem [nghiệm thu baskets](../docs/de/03f_nghiem_thu_baskets.md).
 

@@ -486,3 +486,23 @@ Chi tiết cách dựng ở [de/08](../de/08_du_lieu_cho_ds.md); cách dùng ở
 | `ml.frequent_itemsets`, `ml.association_rules` | `run_key` × tập / luật | `items` / `antecedent`, `consequent`, `support`, `confidence`, `lift` | Chỉ lưu cho các lần chạy E7 (và lần được đánh dấu `persist`) |
 | `ml.holdout_metrics` | `run_key` × `min_confidence` × `eval_part` × k | HitRate, Precision, Recall @k, coverage | Chọn champion; so với baseline phổ biến |
 | `gold.association_rules`, `gold.recommendations`, `gold.experiment_metrics`, `gold.holdout_metrics` | View | Luật có tên sản phẩm; top 10 món mua kèm; trung vị + speedup | Power BI trang 2, 6, 7 |
+
+## 8. Kết quả chất lượng `ops.dq_results` (AD-DE-16)
+
+Bảng Delta thường gồm: `update_id STRING`, `pipeline STRING` (ưu tiên ID), `flow STRING`,
+`dataset STRING`, `expectation STRING`, `passed BIGINT`, `failed BIGINT`, `at TIMESTAMP_LTZ`, đều NOT NULL.
+`pipeline_name STRING` có thể NULL nếu event log không cung cấp tên và nằm ngoài khóa MERGE.
+Power BI hiển thị tên này, fallback về `pipeline` khi thiếu.
+Grain/khóa MERGE là **pipeline × update_id × flow × dataset × expectation**. Dataset bắt buộc vì
+cùng flow có thể có một luật cùng tên trên nhiều view. Đếm lại cùng update/log không nhân dòng.
+
+Passed/failed là tổng counter đã emit, không phải cardinality cuối của bảng silver. Thu cả micro-batch
+RUNNING, loại event ID trùng; không dựng zero khi thiếu metrics. Một bản ghi có thể vi phạm nhiều luật,
+view có thể được tính trong nhiều flow; SUM failed không phải số dòng quarantine. Khi fail dừng update,
+xem ERROR/violation thay vì suy ra số đếm không được emit. `at` là max event timestamp, không phải lúc thu.
+
+Đã nghiệm thu batch trên warehouse dev với **47 khóa expectation**. Hai lượt MERGE
+giữ nguyên kết quả và đã đối chiếu bốn bảng quarantine. Còn chờ event log stream.
+Hợp đồng, truy vấn điều tra và nghiệm thu:
+[DE/06 §3](../de/06_van_hanh_chay_lai.md#3-event-log-và-opsdq_results),
+[hướng dẫn collect_dq](../de/06b_nghiem_thu_dq.md).
