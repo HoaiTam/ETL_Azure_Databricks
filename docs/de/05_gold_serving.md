@@ -70,34 +70,17 @@ dùng số liệu trên báo cáo.
 `product_360` giữ cả sản phẩm chưa từng được đặt, với `times_ordered = 0`. Expectation
 `one_row_per_product` dừng flow nếu khóa thiếu hoặc fanout. Nghiệm thu đủ 49.688 sản phẩm.
 
-```python
-@dp.materialized_view(name=f"{GOLD}.product_pair_counts", cluster_by=["p1"])
-def product_pair_counts():
-    # Baseline DE cho trang 2. Luật kết hợp đầy đủ là gold.association_rules / recommendations của DS (ds/05 §4).
-    return spark.sql(f"""
-      WITH top AS (SELECT product_id FROM {GOLD}.product_360 ORDER BY times_ordered DESC LIMIT 5000),
-           b AS (SELECT e.order_id, array_sort(collect_list(e.product_id)) AS items      -- giữ món thuộc top
-                 FROM (SELECT order_id, explode(items) AS product_id
-                       FROM {SILVER}.baskets WHERE split = 'prior') e
-                 JOIN top USING (product_id)
-                 GROUP BY e.order_id),
-           n AS (SELECT count(*) AS n_baskets FROM {SILVER}.baskets WHERE split = 'prior'),
-           pairs AS (SELECT p.p1, p.p2 FROM b
-                     LATERAL VIEW explode(flatten(transform(items, (a, i) ->
-                        transform(slice(items, i + 2, size(items)), c -> named_struct('p1', a, 'p2', c))))) t AS p),
-           cnt AS (SELECT p1, p2, count(*) AS pair_count FROM pairs GROUP BY p1, p2 HAVING count(*) >= 50),
-           single AS (SELECT product_id, times_ordered FROM {GOLD}.product_360)
-      SELECT c.p1, c.p2, c.pair_count,
-             c.pair_count / n.n_baskets                               AS support,
-             c.pair_count / s1.times_ordered                          AS confidence_p1_to_p2,
-             (c.pair_count * n.n_baskets) / (s1.times_ordered * s2.times_ordered) AS lift
-      FROM cnt c CROSS JOIN n
-      JOIN single s1 ON s1.product_id = c.p1 JOIN single s2 ON s2.product_id = c.p2""")
-```
+`product_pair_counts` lấy top 5.000 sản phẩm từ `product_360`, dùng mã sản phẩm để
+phá hòa. Với mỗi giỏ prior, lọc về danh mục top, khử trùng và sắp tăng dần trước khi tạo cặp,
+nên luôn có `p1 < p2`. Giữ cặp xuất hiện ít nhất 50 giỏ, sắp theo `pair_count` giảm dần,
+rồi `p1, p2` tăng dần và giới hạn 200.000 dòng.
 
-- `items` được `array_sort` lại sau khi lọc, nên luôn có `p1 < p2`, không cần `least` / `greatest`.
-- `times_ordered` ở `product_360` đếm **mọi** đơn (prior + stream), còn `pair_count` chỉ đếm giỏ prior. Vì vậy `confidence` / `lift` ở đây là số **xấp xỉ** cho dashboard. Số chuẩn để đánh giá thuật toán do DS tính trên đúng split.
-- Lọc top 5.000 sản phẩm và `HAVING ≥ 50` giữ phép đếm cặp trong khả năng của 4 vCPU. Ghi thời gian chạy vào benchmark.
+Support chia số giỏ có cặp cho toàn bộ số giỏ prior. Confidence/lift là **xấp xỉ**
+vì `product_360.times_ordered` dùng cả prior và stream, còn `pair_count` chỉ dùng prior.
+Số đo đánh giá thuật toán do DS tính trên đúng split.
+
+MV cần cả `enable_gold_fact=true` và `enable_baskets=true`. Khi benchmark, dùng truy
+vấn event log ở §4.1 với flow `product_pair_counts` và ghi update ID, số cặp, thời gian flow.
 
 ### 2.3 Dim và bảng phân quyền
 

@@ -110,3 +110,45 @@ if spark.conf.get("enable_gold_fact", "false").lower() == "true":
             SELECT DISTINCT lower(trim(user_email)) AS user_email, department_id
             FROM {table_name(seed_schema, "bi_access_seed")}
         """)
+
+    if spark.conf.get("enable_baskets", "false").lower() == "true":
+
+        @dp.materialized_view(name=table_name(GOLD, "product_pair_counts"), cluster_by=["p1"])
+        @dp.expect_or_fail("ordered_pair", "p1 < p2")
+        def product_pair_counts():
+            return spark.sql(f"""
+                WITH top_products AS (
+                  SELECT product_id, times_ordered
+                  FROM {table_name(GOLD, "product_360")}
+                  WHERE times_ordered > 0
+                  ORDER BY times_ordered DESC, product_id
+                  LIMIT 5000
+                ), prior_baskets AS (
+                  SELECT order_id, items FROM {table_name(SILVER, "baskets")} WHERE split = 'prior'
+                ), eligible AS (
+                  SELECT e.order_id, array_sort(collect_set(e.product_id)) AS items
+                  FROM (SELECT order_id, explode(items) AS product_id FROM prior_baskets) e
+                  INNER JOIN top_products USING (product_id)
+                  GROUP BY e.order_id
+                  HAVING count(DISTINCT e.product_id) >= 2
+                ), positions AS (
+                  SELECT items, i, p1 FROM eligible LATERAL VIEW posexplode(items) pos AS i, p1
+                ), counted AS (
+                  SELECT p1, p2, count(*) AS pair_count FROM positions
+                  LATERAL VIEW explode(slice(items, i + 2, size(items) - i - 1)) tail AS p2
+                  GROUP BY p1, p2 HAVING count(*) >= 50
+                  ORDER BY pair_count DESC, p1, p2
+                  LIMIT 200000
+                ), total AS (
+                  SELECT count(*) AS n_baskets FROM prior_baskets
+                )
+                SELECT c.p1, c.p2, c.pair_count,
+                       CAST(c.pair_count AS DOUBLE) / n.n_baskets AS support,
+                       CAST(c.pair_count AS DOUBLE) / s1.times_ordered AS confidence_p1_to_p2,
+                       (CAST(c.pair_count AS DOUBLE) / s1.times_ordered) *
+                         (CAST(n.n_baskets AS DOUBLE) / s2.times_ordered) AS lift
+                FROM counted c
+                INNER JOIN top_products s1 ON s1.product_id = c.p1
+                INNER JOIN top_products s2 ON s2.product_id = c.p2
+                CROSS JOIN total n
+            """)
