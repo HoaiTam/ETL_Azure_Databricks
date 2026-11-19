@@ -33,6 +33,10 @@ variables:
     description: Serverless SQL warehouse cho các task vận hành (AD-DE-18)
     lookup:
       warehouse: wh-instacart-bi
+  batch_email_notifications:
+    description: Địa chỉ nhận lỗi và cảnh báo chạy lâu của job batch qua cấu hình deploy
+    type: complex
+    default: {}
   enable_off:
     description: Bật bronze và silver OFF sau khi dữ liệu crawler đã công bố trong off_root
     default: "false"
