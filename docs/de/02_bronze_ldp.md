@@ -217,12 +217,18 @@ for _table in ("product_prices", "promotions"):
 
 ### 3.3 Open Food Facts: JSON lồng nhau và ảnh
 
+`OFF_ROOT` dùng cùng đường dẫn với crawler. Pipeline mặc định `enable_off=false`.
+Trên dev, truyền `BUNDLE_VAR_enable_off=true` sau khi đã có JSONL và nhánh ảnh trên landing.
+Trên prod, sau lượt crawl đầu tiên tạo dữ liệu, mở PR đặt `enable_off: "true"` trong
+`targets.prod.variables` của [bundles/databricks.yml](../../bundles/databricks.yml).
+CI triển khai cấu hình prod sau khi PR được duyệt và merge.
+
 ```python
 @dp.table(name=f"{BRONZE}.off_products",
           comment="Bronze: kết quả search OFF (mỗi dòng = một hit), JSON lồng nhau",
           table_properties=BRONZE_PROPS)
 def off_products():
-    return autoload(f"{LANDING}/off_api/products/", "json",
+    return autoload(f"{OFF_ROOT}/products/", "json",
                     **{"cloudFiles.schemaEvolutionMode": "addNewColumns",
                        "cloudFiles.inferColumnTypes": "true",
                        # nutriments có hàng trăm khóa và kiểu lẫn lộn → giữ dạng map, silver mới lấy khóa cần
@@ -236,7 +242,7 @@ def product_images():
     return (spark.readStream.format("cloudFiles")
             .option("cloudFiles.format", "binaryFile")
             .option("pathGlobFilter", "*.jpg")
-            .load(f"{LANDING}/off_api/images/")
+            .load(f"{OFF_ROOT}/images/")
             .select(F.regexp_extract("path", r"/([^/]+)\.jpg$", 1).alias("off_code"),
                     "path", "length", "modificationTime",
                     F.current_timestamp().alias("_ingest_ts")))

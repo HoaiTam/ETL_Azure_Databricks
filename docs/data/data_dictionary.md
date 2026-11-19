@@ -326,8 +326,9 @@ Một kết quả thật khi tìm "Chocolate Sandwich Cookies" (`product_id = 1`
 
 - **Không crawl hết** 49.688 sản phẩm: với khoảng 10 lần tìm/phút, việc đó mất khoảng 83 giờ.
 - **Phạm vi:** top khoảng 2.000 sản phẩm phổ biến nhất (theo số lần xuất hiện trong `order_products__prior`), khoảng 3,5 giờ gọi API. Nhóm này chiếm phần lớn số món trong các giỏ hàng.
-- **Mỗi lần chạy lấy một lô**, ví dụ 300 sản phẩm chưa tra. Mỗi lô ghi **một file JSON mới**: `landing/off_api/ingest_date=YYYY-MM-DD/batch_<n>.json`.
+- **Mỗi lần chạy lấy một lô**, ví dụ 300 sản phẩm chưa tra. Mỗi lô ghi **một file JSON mới**: `<off_root>/products/batch=<plan_hash>/batch_<content_hash>.json`.
 - **Bảng trạng thái `off_crawl_state`** ghi sản phẩm nào đã tra, kết quả thế nào. Lần chạy sau bỏ qua sản phẩm đã xong và thử lại những sản phẩm bị lỗi.
+- `off_crawl_state.batch_id STRING` lưu hash kế hoạch của lô đã xử lý. `batch_file` trỏ JSONL đã công bố nếu có hit.
 - **Auto Loader** tự nhặt file mới vào `bronze.off_products`, như mọi nguồn file khác.
 - **Nơi chạy crawler:** chọn một trong hai.
   - Python trong một task của Databricks job: đơn giản, dễ viết logic chấm điểm.
