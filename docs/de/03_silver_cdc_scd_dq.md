@@ -66,21 +66,21 @@ SCD2 trả lời được câu hỏi "**đơn đặt ngày 05/03 trả giá bao 
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
-from common.dq import PRICE_RULES, PROMO_RULES
+from common.retail import PRICE_CHANGE_RULES, PROMO_CHANGE_RULES, assess_changes, deduplicate_changes
 
 CAT    = spark.conf.get("catalog")
 BRONZE = f"{CAT}.{spark.conf.get('bronze')}"
 SILVER = f"{CAT}.{spark.conf.get('silver')}"
 
-@dp.temporary_view(comment="Thay đổi giá đã loại trùng; nguồn của AUTO CDC")
-@dp.expect_all_or_drop(PRICE_RULES)          # dòng vi phạm bị bỏ, số lượng ghi vào event log
+@dp.temporary_view(name="product_prices_valid")
+@dp.expect_all_or_drop(PRICE_CHANGE_RULES)
+def product_prices_valid():
+    return assess_changes(spark.readStream.table(f"{BRONZE}.product_prices_cdc"), "prices")
+
+
+@dp.temporary_view(comment="Thay đổi giá đã qua DQ rồi loại bản sao; nguồn của AUTO CDC")
 def product_prices_changes():
-    return (spark.readStream.table(f"{BRONZE}.product_prices_cdc")
-            .select("product_id", "unit_price", "currency", "updated_at",
-                    F.col("_op").cast("int").alias("_op"), "_lsn", "_seqval")
-            # Cùng một thay đổi có thể được đọc 2 lần (rerun cả pipeline ADF, hoặc snapshot lại).
-            # Khóa (product_id, updated_at) xác định duy nhất một lần đổi giá.
-            .dropDuplicates(["product_id", "updated_at"]))
+    return deduplicate_changes(spark.readStream.table("product_prices_valid"), "prices")
 
 
 dp.create_streaming_table(
@@ -93,7 +93,6 @@ dp.create_auto_cdc_flow(
     source="product_prices_changes",
     keys=["product_id"],
     sequence_by=F.col("updated_at"),               # thời gian nghiệp vụ → __START_AT có nghĩa
-    apply_as_deletes=F.expr("_op = 1"),
     except_column_list=["_op", "_lsn", "_seqval"],
     stored_as_scd_type=2,
     track_history_column_list=["unit_price", "currency"],   # đổi cột khác không sinh phiên bản mới
@@ -108,7 +107,6 @@ CREATE OR REFRESH STREAMING TABLE product_prices_history;
 CREATE FLOW prices_scd2 AS AUTO CDC INTO product_prices_history
 FROM stream(product_prices_changes)
 KEYS (product_id)
-APPLY AS DELETE WHEN _op = 1
 SEQUENCE BY updated_at
 COLUMNS * EXCEPT (_op, _lsn, _seqval)
 STORED AS SCD TYPE 2
@@ -120,6 +118,9 @@ TRACK HISTORY ON unit_price, currency;
 - **Đóng phiên bản cũ:** gán `__END_AT` cho phiên bản cũ và mở phiên bản mới trong cùng một giao dịch.
 - **Idempotent:** áp dụng lại cùng một thay đổi (cùng khóa, cùng `SEQUENCE BY`) không tạo phiên bản mới.
 
+Giá chỉ truyền snapshot, insert và update-after vào SCD2. `no_price_delete` đưa op=1 vào
+quarantine vì delete SQL có thể mang lại cùng `updated_at` của bản trước.
+
 **Vì sao `SEQUENCE BY updated_at` mà không dùng `_lsn`:**
 - Cả hai đều đúng thứ tự.
 - Nhưng `__START_AT` / `__END_AT` lấy giá trị từ cột sequence. Dùng `updated_at` thì khoảng hiệu lực là **ngày giả lập**, join được với `order_ts_sim`. Dùng LSN thì chỉ ra một chuỗi hex.
@@ -128,13 +129,15 @@ TRACK HISTORY ON unit_price, currency;
 ### 2.3 Promotions: SCD Type 1 có xóa
 
 ```python
-@dp.temporary_view
-@dp.expect_all_or_drop(PROMO_RULES)
+@dp.temporary_view(name="promotions_valid")
+@dp.expect_all_or_drop(PROMO_CHANGE_RULES)
+def promotions_valid():
+    return assess_changes(spark.readStream.table(f"{BRONZE}.promotions_cdc"), "promotions")
+
+
+@dp.temporary_view(name="promotions_changes")
 def promotions_changes():
-    return (spark.readStream.table(f"{BRONZE}.promotions_cdc")
-            .select("promo_id", "product_id", "promo_type", "discount_pct", "start_date", "end_date",
-                    "updated_at", F.col("_op").cast("int").alias("_op"), "_lsn", "_seqval")
-            .dropDuplicates(["promo_id", "_lsn", "_seqval", "_op"]))
+    return deduplicate_changes(spark.readStream.table("promotions_valid"), "promotions")
 
 
 dp.create_streaming_table(name=f"{SILVER}.promotions",
@@ -155,6 +158,9 @@ dp.create_auto_cdc_flow(
 
 ### 2.4 Kiểm tra SCD
 
+`24852` dưới đây là ví dụ. Khi nghiệm thu, chọn product_id thật từ kế hoạch seed đã đổi giá
+ở cả wave 1 và wave 3; không mặc định Banana nằm trong tập ngẫu nhiên của cả hai wave.
+
 ```sql
 -- 3 phiên bản của Banana, chỉ 1 phiên bản đang mở
 SELECT product_id, unit_price, __START_AT, __END_AT
@@ -168,6 +174,22 @@ WHERE __END_AT IS NULL GROUP BY 1 HAVING count(*) > 1;              -- 0 dòng
 SELECT count(*) FROM instacart.silver.promotions p
 JOIN (SELECT promo_id FROM instacart.bronze.promotions_cdc WHERE _op = 1) d USING (promo_id);   -- 0
 ```
+
+### 2.5 Triển khai AD-DE-11 và điều kiện đầu vào
+
+Code thực tế ở [`silver_retail.py`](../../src/pipelines/batch/silver_retail.py), helper Spark thuần
+ở [`common/retail.py`](../../src/common/retail.py). Hướng dẫn nghiệm thu, giới hạn test local và
+các ca delete/late/replay ở [03b · Nghiệm thu silver retail](03b_nghiem_thu_retail.md).
+
+Helper tái sử dụng PRICE_RULES/PROMO_RULES từ common.dq, bổ sung kiểm khóa/operation/sequence/rescue;
+delete không cần business payload để tránh chặn tombstone hợp lệ. LSN/seqval chuẩn hóa thành binary(10),
+before-image op=3 chỉ giữ ở bronze. Pipeline đặt session UTC, updated_at chuẩn hóa TIMESTAMP_LTZ.
+DQ xảy ra trước dedup; quarantine giá và khuyến mãi giữ nguyên raw payload và mọi tên luật lỗi.
+
+Chỉ gộp bản sao cùng payload: không chọn tùy ý một giá khi hai giá khác nhau trùng business time.
+AUTO CDC vẫn yêu cầu một trạng thái duy nhất cho mỗi key/sequence; seed và nguồn phải bảo đảm điều này.
+Không đặt watermark theo updated_at vì có snapshot lịch sử 2015 và sự kiện đến muộn; state dedup được
+giữ trong checkpoint, cần theo dõi dung lượng khi mở rộng ngoài quy mô đồ án.
 
 ## 3. Đơn hàng và thời gian giả lập
 
@@ -304,7 +326,7 @@ def quarantine(name: str, source: str, rules: dict):
 
 
 # Instacart dùng hai quarantine trong silver_instacart.py với cùng INPUT_RULES của nhánh xử lý.
-quarantine("product_prices",    f"{BRONZE}.product_prices_cdc",   PRICE_RULES)
+# Retail dùng quarantine chuyên biệt trong silver_retail.py, cùng rules với valid view.
 ```
 
 Các bộ `ORDER_RULES`, `ITEM_RULES`, `PRICE_RULES`, `PROMO_RULES`, `EVENT_RULES` được định nghĩa

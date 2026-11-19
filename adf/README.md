@@ -14,8 +14,10 @@ JSON được dựng theo API và đã kiểm model SDK. Terraform phụ trách 
 | `pipelines/pl_ingest_instacart.json` | **Mảng activities** pipeline cha | Gửi nguyên làm `properties.activities` |
 | `pipelines/pl_ingest_instacart_table.json` | Mảng activities pipeline con | Stack tự tạo con trước cha theo `referenceName` `pl_*` |
 | `pipeline_settings/<pipeline>.json` | `concurrency` và `parameters` mặc định | P1 phải nạp cùng activities, không bỏ qua |
-| `datasets/*.json` | 3 định nghĩa dataset với linked service theo tên | Stack `40-orchestration` publish mọi file bằng `azapi_resource` (AD-OPS-25); `name` phải trùng tên file |
+| `datasets/*.json` | 5 định nghĩa dataset với linked service theo tên | Stack `40-orchestration` publish mọi file bằng `azapi_resource` (AD-OPS-25b); `name` phải trùng tên file |
 | `assets/_SUCCESS` | Template 0 byte | P1 đưa đúng file vào `landing/ops/_SUCCESS` trước lần chạy đầu |
+
+[ADF retail CDC](README_RETAIL_CDC.md) mô tả hai dataset retail SQL/Parquet và ba pipeline CDC. Copy Binary dùng chung dataset ADLS của Instacart.
 
 Stack `40-orchestration` khai mọi tham số pipeline là **String** (`settings.parameters` là map chuỗi).
 Vì vậy `tables_json`, `expected_rows`, `translators_json` là **String chứa JSON**, đọc bằng `json()` trong ADF;

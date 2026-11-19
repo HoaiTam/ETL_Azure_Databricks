@@ -5,9 +5,11 @@ from __future__ import annotations
 import ast
 import csv
 import json
+import operator
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import quote
 
 
 class PipelineFailure(RuntimeError):
@@ -28,6 +30,7 @@ class LocalADF:
         self.fail_at = None
         self.copy_output = None
         self.drop_marker = False
+        self.run_id = "local-adf-run"
         template = root / "landing/ops/_SUCCESS"
         template.parent.mkdir(parents=True)
         template.write_bytes(b"")
@@ -35,9 +38,13 @@ class LocalADF:
     def value(self, value, context):
         if isinstance(value, dict):
             if value.get("type") == "Expression":
-                expression = re.sub(r"\b(and|not)\(", r"\1_(", value["value"][1:])
+                expression = re.sub(
+                    r"'(?:[^']|'')*'|\b(and|or|not)\(",
+                    lambda token: f"{token[1]}_(" if token[1] else repr(token[0][1:-1].replace("''", "'")),
+                    value["value"][1:],
+                )
                 functions = {
-                    "pipeline": lambda: {"parameters": context["parameters"]},
+                    "pipeline": lambda: {"parameters": context["parameters"], "RunId": self.run_id},
                     "dataset": lambda: context["dataset"],
                     "activity": lambda name: {"output": context["outputs"][name]},
                     "item": lambda: context["item"],
@@ -47,7 +54,16 @@ class LocalADF:
                     "concat": lambda *x: "".join(map(str, x)),
                     "equals": lambda a, b: a == b,
                     "and_": lambda a, b: a and b,
-                    "not_": lambda x: not x,
+                    "not_": operator.not_,
+                    "or_": lambda *values: any(values),
+                    "greater": operator.gt,
+                    "greaterOrEquals": operator.ge,
+                    "empty": operator.not_,
+                    "trim": str.strip,
+                    "length": len,
+                    "replace": str.replace,
+                    "startsWith": str.startswith,
+                    "uriComponent": lambda text: quote(text, safe=""),
                 }
 
                 def evaluate(node):
@@ -69,7 +85,7 @@ class LocalADF:
 
     def dataset(self, reference, context):
         definition = self.datasets[reference["referenceName"]]
-        parameters = {key: info["defaultValue"] for key, info in definition["parameters"].items()}
+        parameters = {key: info.get("defaultValue") for key, info in definition.get("parameters", {}).items()}
         parameters |= self.value(reference.get("parameters", {}), context)
         location = self.value(definition["typeProperties"]["location"], context | {"dataset": parameters})
         if location["type"] == "HttpServerLocation":
@@ -104,8 +120,13 @@ class LocalADF:
                         self.execute(props["activities"], context | {"item": item})
                 elif kind == "IfCondition":
                     branch = "ifTrueActivities" if self.value(props["expression"], context) else "ifFalseActivities"
-                    self.execute(props[branch], context)
+                    self.execute(props.get(branch, []), context)
+                elif kind == "Switch":
+                    value = self.value(props["on"], context)
+                    cases = {case["value"]: case["activities"] for case in props["cases"]}
+                    self.execute(cases.get(value, props["defaultActivities"]), context)
                 elif kind == "ExecutePipeline":
+                    assert props["waitOnCompletion"] is True
                     self.run(props["pipeline"]["referenceName"], **self.value(props["parameters"], context))
                 elif kind == "Fail":
                     raise PipelineFailure(props["errorCode"])
@@ -115,6 +136,10 @@ class LocalADF:
                     if "size" in props["fieldList"]:
                         output["size"] = path.stat().st_size
                     context["outputs"][name] = output
+                elif kind in ("Lookup", "SqlServerStoredProcedure") or (
+                    kind == "Copy" and props["source"]["type"] == "AzureSqlSource"
+                ):
+                    context["outputs"][name] = self.sql_activity(a, context)
                 elif kind == "Copy":
                     src, source_definition = self.dataset(a["inputs"][0], context)
                     dst, sink_definition = self.dataset(a["outputs"][0], context)
@@ -143,6 +168,7 @@ class LocalADF:
                         raise PipelineFailure(name)
                 elif kind == "Delete":
                     path, _ = self.dataset(props["dataset"], context)
+                    assert props["storeSettings"]["recursive"] is True
                     shutil.rmtree(path)
                 else:
                     raise ValueError(f"Hoạt động chưa được mô phỏng: {kind}")
@@ -151,3 +177,6 @@ class LocalADF:
                     raise PipelineFailure(name)
                 completed.add(name)
                 pending.remove(a)
+
+    def sql_activity(self, activity, context):
+        raise ValueError(f"Chưa có fixture SQL cho {activity['name']}")

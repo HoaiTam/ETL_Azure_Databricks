@@ -119,7 +119,7 @@
 
 | Schema | Chủ | Bảng | Ghi chú |
 |---|---|---|---|
-| `ds_data` | DE | `data_versions`, `baskets`, `item_index`, `transactions`, `holdout_eval` | DS chỉ đọc. Có volume `exports` ([de/08](../de/08_du_lieu_cho_ds.md)) |
+| `ds_data` | DE | `data_versions`, `baskets`, `item_index`, `transactions`, `holdout_eval` | DS chỉ đọc. Có volume `exports`. Hai bảng `ds_prepare_products` và `ds_prepare_holdout` dùng nội bộ DE, DS không dùng ([de/08](../de/08_du_lieu_cho_ds.md)) |
 | `ml` | DS | `experiment_runs`, `frequent_itemsets`, `association_rules`, `holdout_metrics`, `recommendations`; model `basket_rules` | Có volume `inbox` để nhận kết quả từ local |
 | `gold` | DE cấp chỗ, DS định nghĩa view | View `association_rules`, `recommendations`, `experiment_metrics` | Power BI chỉ đọc `gold`. View chạy bằng quyền của chủ view, nên vai `bi` không cần quyền vào `ml` |
 

@@ -402,7 +402,10 @@ Chi tiết cách dựng ở [de/08](../de/08_du_lieu_cho_ds.md); cách dùng ở
 
 | Bảng | Hạt | Cột chính | Vai trò |
 | --- | --- | --- | --- |
+| `ds_data.data_versions` | phiên bản | `data_version`, `created_at`, `n_prior`, `n_holdout`, `source` | Theo dõi snapshot đã cố định đủ giỏ, danh mục và thứ tự holdout |
 | `ds_data.baskets` | phiên bản × đơn | `data_version`, `order_id`, `split`, `items` (product_id) | Bản cố định của `silver.baskets`. `v1` không bao giờ bị ghi đè |
+| `ds_data.ds_prepare_products` | phiên bản × sản phẩm | `product_id`, tên sản phẩm, khóa và tên aisle/department | Danh mục nội bộ cố định cho việc tính lại index và transactions |
+| `ds_data.ds_prepare_holdout` | phiên bản × đơn holdout | `order_id`, `ordered_products` (product_id theo vị trí bỏ vào giỏ) | Đầu vào nội bộ để tính lại context/targets từ thứ tự ban đầu |
 | `ds_data.item_index` | phiên bản × cấp × item | `grain` (`product`/`aisle`/`department`), `item_key`, `idx`, `freq_prior` | `idx` đánh từ 0 theo tần suất giảm dần trong `prior`; "top-N item" = `idx < N` |
 | `ds_data.transactions` | phiên bản × cấp × đơn | `items` (mảng `idx` tăng dần), `n_items`, `scale_bucket` (0–99) | Đầu vào của DApriori, DATID, FP-Growth. `scale_bucket < p` lấy p% số giỏ, các tập con lồng nhau |
 | `ds_data.holdout_eval` | phiên bản × đơn holdout | `eval_part` (`val`/`test`), `context`, `targets` | Đánh giá gợi ý: nửa đầu giỏ theo thứ tự bỏ vào làm ngữ cảnh, nửa sau làm đáp án |
