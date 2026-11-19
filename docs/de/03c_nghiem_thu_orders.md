@@ -38,12 +38,13 @@ mọi bảng khác cùng rollback; kiểm event log và quarantine khi clock fai
 
 ## Batch và món prior
 
-orders_batch chỉ giữ prior/test sau khi có clock đủ split, không tạo header train. Giữ _ingest_ts và
-_rescued_data phục vụ lineage/DQ, không công bố _raw/_dq_failed/_source_file/_file_mtime trong MV này.
+orders_batch chỉ giữ prior/test sau khi có clock đủ split, không tạo header train. Giữ _ingest_ts phục vụ
+lineage. Không công bố _rescued_data (sau DQ luôn NULL), _raw/_dq_failed/_source_file/_file_mtime trong MV này.
 is_test chỉ đúng cho test; đơn test không có món ở nguồn, không tự sinh món để đi vào baskets.
 
 Món hàng chỉ đọc bronze.order_products_prior; không đọc train. Đầu vào stream qua DQ rồi AUTO CDC SCD1,
-key kép order_id/product_id, sequence là ingest time TIMESTAMP_LTZ. File replay được bronze đọc lại ở
+key kép order_id/product_id, sequence là `struct(_ingest_ts, _file_mtime, _source_file)` để hai bản cùng
+micro-batch vẫn có thứ tự tất định. File replay được bronze đọc lại ở
 đường dẫn mới có thể tạo event mới; upsert target là trách nhiệm của engine AUTO CDC, không append thẳng
 và không thay bằng dropDuplicates giữ key mãi để vô tình loại các correction hợp lệ. File gốc không bị sửa.
 _ingest_ts giữ trong target, các metadata file/rescue không đưa vào target; input cần một payload nhất quán
@@ -106,6 +107,22 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Chưa kiểm workspace: validate/deploy/update, bộ Instacart thật/sample 1%, các count ở trên, replay AUTO CDC
-và đo MERGE đầu tiên. Thiếu CLI/profile được chỉ định và nguồn/hạ tầng để nghiệm thu. PR giữ draft,
-issue #48 mở chờ gate #45; không xác nhận G3 từ fixture local.
+## Kết quả nghiệm thu dev (2026-11-19)
+
+Bộ Instacart thật trên bronze AD-DE-09.
+- `bundle validate -t dev` đạt.
+- Update [`c1292e3c`](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/c1292e3c-2a52-4458-9752-04cea064b3c7)
+  COMPLETED.
+- Sau khi gộp main có silver retail, update `b3865e15-e637-41ba-8e52-30223d9c6590` COMPLETED.
+
+| Kiểm tra | Kết quả |
+|---|---:|
+| `order_items_prior`: `count(*)` / `count(DISTINCT order_id, product_id)` | 32.434.489 / 32.434.489 |
+| `order_time_sim`: số dòng / `order_ts_sim IS NULL` | 3.421.083 / 0 |
+| `orders_batch`: số dòng / số `order_id` khác nhau (prior + test, không train) | 3.289.874 / 3.289.874 |
+| `quarantine_orders` / `quarantine_order_items_prior` | 0 / 0 |
+
+**Chưa nghiệm thu:**
+- Replay AUTO CDC bằng file công bố lại.
+- Đo thời gian MERGE đầu tiên vào `ops.benchmark_results`.
+- Đối soát FK với danh mục (AD-DE-17).
