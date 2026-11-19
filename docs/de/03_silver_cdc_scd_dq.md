@@ -406,9 +406,9 @@ PyArrow trong dev dependencies phục vụ Spark local; notebook dùng Arrow/pan
 Test đăng ký `dp` giả lập không thay cho update pipeline trên workspace.
 
 Cách chạy dev, lấy đủ ba nhãn, mẫu số và ghi tỉ lệ thật:
-[03d_nghiem_thu_off.md](03d_nghiem_thu_off.md). **Chưa đo tỉ lệ thật** ở AD-DE-13;
-không dùng tỉ lệ từ fixture làm coverage của Instacart. AD-DE-10 (#46) chưa được nghiệm thu,
-AD-DE-02 (#38) đã đóng. `dim_product` thuộc AD-DE-14.
+[03d_nghiem_thu_off.md](03d_nghiem_thu_off.md). AD-DE-10 (#46) đã nghiệm thu Bronze OFF trên dev.
+Kết quả đo AD-DE-13 ở [data dictionary §5.6](../data/data_dictionary.md#56-cách-join-ghép-theo-tên-qua-bảng-cầu-nối).
+`dim_product` thuộc AD-DE-14.
 
 ## 6. `dim_product`: join nhiều nguồn mà không nhân dòng
 

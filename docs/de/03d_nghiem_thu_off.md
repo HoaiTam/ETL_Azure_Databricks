@@ -17,8 +17,8 @@ trước nghiệm thu. Chỉ nhận hit của đúng sản phẩm đã tra, có 
 Các trường dinh dưỡng không parse được thành NULL; có thể xem lại raw ở bronze.
 Tên thiếu vẫn giữ trong clean với expectation warn và điểm 0.
 
-Cần hoàn tất AD-DE-10 (#46), nguồn bronze của #45, cấu hình bundle #44 và các quyền/schema/policy
-trong [bundles/README](../../bundles/README.md). AD-DE-02 (#38) đã đóng.
+AD-DE-10 (#46) đã nghiệm thu crawler và Bronze OFF trên dev. Dùng nguồn Bronze của #45,
+bundle #44 và quyền/schema/policy trong [bundles/README](../../bundles/README.md).
 Dev phải dùng **cùng `off_root`** giữa crawler và bronze; không trộn lô prod vào dev.
 Chạy crawler lần đầu với `source=landing` nếu bronze OFF chưa tồn tại theo
 [hướng dẫn crawler](../../src/ingest/README.md). Không reset checkpoint hay full refresh bronze.
@@ -36,7 +36,7 @@ databricks bundle run -t dev --profile <profile> instacart_batch
 
 Cờ mặc định là `false`. Khi bật, pipeline đăng ký các bảng bronze và ba MV OFF.
 Notebook được glob hiện tại nạp; ô đầu cài `rapidfuzz==3.14.6`, cùng phiên bản trong lockfile.
-Kiểm import `common` từ `root_path=src` trên cả driver và worker của runtime LDP.
+Driver nạp `common` từ `root_path=src` và đóng gói scorer cùng hàm chuẩn hóa theo giá trị. Worker dùng RapidFuzz trong môi trường pipeline.
 Pipeline chỉ dùng cluster/policy hiện có; tránh chạy cùng crawler/seed/stream trong quota 4 vCPU.
 Không deploy prod thủ công. Lưu commit, pipeline ID, update ID và trạng thái update thực tế.
 
@@ -95,7 +95,7 @@ vì token_set_ratio có thể cho điểm 100. Ở AD-DE-14 chỉ cho `matched` 
    và comment issue #49: commit, update ID, thời điểm đo, nguồn/Delta version, số sản phẩm,
    số crawl theo status, số có hit Mỹ, số/tỉ lệ đủ ba nhãn, số quarantine, kết quả replay và kiểm tay.
 
-**Trạng thái hiện tại:** đã kiểm local Spark 3.5 với Arrow thật trên Java 17 và dữ liệu fixture. Sử dụng Java 17 cho bộ test này.
-Đã chạy scorer trên pipeline dev cách ly với lô 5 sản phẩm, xác nhận worker import được mô-đun
-và bridge có 49.688 dòng. Xem mô tả PR #159 để đối chiếu update và các số dòng nghiệm thu.
-Replay Delta và tỷ lệ khớp G3 trên lô đủ quy mô còn chờ nghiệm thu.
+**Trạng thái hiện tại:** đã kiểm trên Spark local và chạy đủ ba flow Silver trên dev với lô 305 sản phẩm.
+UDF hoàn tất trên worker. Tỷ lệ theo từng nhóm và thông tin update nằm ở
+[data dictionary §5.6](../data/data_dictionary.md#56-cách-join-ghép-theo-tên-qua-bảng-cầu-nối).
+Replay Delta và tỷ lệ trên lô prod đầy đủ còn chờ nghiệm thu.

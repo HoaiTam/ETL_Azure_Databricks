@@ -95,8 +95,8 @@ Smoke update kiểm đường chạy của pipeline và event log. Đối soát 
 AD-DE-13 bổ sung notebook `src/pipelines/batch/silver_off.py` được glob hiện tại nạp:
 `off_products_clean`, `product_off_match` và quarantine trong schema silver đã resolve.
 Notebook cài RapidFuzz ở ô đầu; không thêm cluster/job. Cách lấy số thật và nghiệm thu:
-[03d_nghiem_thu_off.md](../docs/de/03d_nghiem_thu_off.md). Chưa kiểm trên workspace,
-chưa đo tỉ lệ khớp; AD-DE-14 tiếp tục dựng `dim_product`.
+[03d_nghiem_thu_off.md](../docs/de/03d_nghiem_thu_off.md). Số đo theo nhóm nằm ở
+[data dictionary §5.6](../docs/data/data_dictionary.md#56-cách-join-ghép-theo-tên-qua-bảng-cầu-nối).
 
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).

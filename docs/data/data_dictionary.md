@@ -363,9 +363,19 @@ File gốc để sửa: [product_enrichment_join.drawio](product_enrichment_join
 | Organic Strawberries                 | Yaourt fraise biologique (sữa chua Pháp) | Sai                      |
 | Bag of Organic Bananas               | Plastic Bag                                | Sai                      |
 
-**Trạng thái AD-DE-13 (2026-11-17): tỉ lệ khớp thực tế chưa đo.** Chưa có lô OFF thật đã
-được nghiệm thu qua bronze và chưa chạy pipeline trên workspace; AD-DE-10 (#46) còn mở.
-Không thay số thật bằng fixture hoặc bốn ví dụ trên.
+#### Đo trên dev
+
+Ngày 2026-11-19, trên lô dev gồm 305 sản phẩm đã crawl, có **279 sản phẩm** với ít nhất một ứng viên Mỹ.
+Commit đo là `508a8a4`. [Update batch dev](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/55bda8da-ae3f-4a14-be01-028193fdf91d) hoàn tất với `enable_off=true`.
+
+| Nhãn | Toàn bridge (49.688) | Tỷ lệ | Đã crawl và có ứng viên Mỹ (279) | Tỷ lệ |
+|---|---:|---:|---:|---:|
+| `matched` | 259 | 0,5213% | 259 | 92,8315% |
+| `low_confidence` | 8 | 0,0161% | 8 | 2,8674% |
+| `no_match` | 49.421 | 99,4626% | 12 | 4,3011% |
+
+Bridge có **49.688 dòng / 49.688 khóa**. Số khóa bằng `bronze.products`.
+`off_products_clean` có **1.525 dòng** và `quarantine_off_products` có **0 dòng**.
 
 Bảng cầu nối giữ **một dòng cho mỗi `product_id` Instacart**, kể cả chưa crawl/chỉ có hit ngoài Mỹ:
 những sản phẩm đó nhận `off_code=NULL`, `off_match_score=0`, `off_match_status=no_match`.
