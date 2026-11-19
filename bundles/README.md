@@ -98,5 +98,8 @@ Notebook cài RapidFuzz ở ô đầu; không thêm cluster/job. Cách lấy s�
 [03d_nghiem_thu_off.md](../docs/de/03d_nghiem_thu_off.md). Số đo theo nhóm nằm ở
 [data dictionary §5.6](../docs/data/data_dictionary.md#56-cách-join-ghép-theo-tên-qua-bảng-cầu-nối).
 
+AD-DE-15 thêm `baskets` và views UC hợp nhất. Mặc định `enable_baskets=false`; chỉ bật
+khi hai bảng stream tồn tại đúng schema. Xem [nghiệm thu baskets](../docs/de/03f_nghiem_thu_baskets.md).
+
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
