@@ -296,4 +296,7 @@ if __name__ == "__main__":
     # Spark Python Task có thể gọi exec(compile(...)) mà không đặt __file__.
     script_path = Path(globals().get("__file__", sys._getframe().f_code.co_filename))
     sys.path.insert(0, str(script_path.resolve().parents[1]))
-    main()
+    # Dùng cùng module với off_images để hai task chia sẻ lớp lỗi HTTP.
+    from ingest.off_crawler import main as run_task
+
+    run_task()

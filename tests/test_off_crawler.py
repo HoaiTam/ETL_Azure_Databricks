@@ -5,7 +5,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 import sys
+from contextlib import nullcontext
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -421,3 +423,52 @@ def test_python_task_entrypoint_accepts_exec_without_dunder_file(monkeypatch):
         exec(compile(source.read_text(), str(source), "exec"), {"__name__": "__main__"})
     assert result.value.code == 0
     assert sys.path[0] == str(source.resolve().parents[1])
+
+
+def test_python_task_entrypoint_skips_http_404_and_downloads_next_image(tmp_path, monkeypatch, capsys):
+    state = State(products(1))
+    hits = [
+        {"code": code, "image_url": f"https://images.openfoodfacts.org/images/{code}.jpg"} for code in ("123", "456")
+    ]
+    run_batch(tmp_path, state, Search([hits]))
+    files = [state.rows[1]["batch_file"]]
+    jpeg = Response(content=b"\xff\xd8\xff\x01\xff\xd9", headers={"Content-Type": "image/jpeg"})
+    session = Session([Response(404), jpeg], Clock())
+    spark = SimpleNamespace(conf=SimpleNamespace(set=lambda *_: None))
+    monkeypatch.setattr("pyspark.sql.SparkSession.Builder.getOrCreate", lambda _: spark)
+    monkeypatch.setattr(
+        "ingest.off_state.SparkState", lambda *_args, **_kwargs: SimpleNamespace(batch_files=lambda: files)
+    )
+    monkeypatch.setattr("requests.Session", lambda: nullcontext(session))
+    monkeypatch.setattr(
+        "ingest.off_images.download_images",
+        lambda _root, batch_files, client: download_images(tmp_path, batch_files, client, limiter=RateLimiter(0)),
+    )
+    source = Path(__file__).parents[1] / "src/ingest/off_crawler.py"
+    monkeypatch.setattr(sys, "path", sys.path[:])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(source),
+            "--mode",
+            "images",
+            "--bronze-schema",
+            "bronze",
+            "--state-schema",
+            "ops",
+            "--off-root",
+            "/Volumes/instacart/dev/raw/off_api",
+        ],
+    )
+
+    exec(compile(source.read_text(), str(source), "exec"), {"__name__": "__main__"})
+
+    assert json.loads(capsys.readouterr().out) == {
+        "downloaded": 1,
+        "existing": 0,
+        "skipped": 1,
+        "failed": 0,
+        "image_requests": 2,
+    }
+    assert (tmp_path / "images/456.jpg").is_file()
