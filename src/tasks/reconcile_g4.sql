@@ -84,6 +84,12 @@ USING (
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:gold_schema, '`', '``') || '`.`fact_order_lines`')),
   all_items AS (SELECT *
       FROM IDENTIFIER('`' || replace(:catalog, '`', '``') || '`.`' || replace(:silver_schema, '`', '``') || '`.`order_items`')),
+  fact_keys AS (
+    SELECT order_id, product_id, count(*) AS key_count FROM fact GROUP BY order_id, product_id
+  ),
+  item_keys AS (
+    SELECT order_id, product_id, count(*) AS key_count FROM all_items GROUP BY order_id, product_id
+  ),
   checks AS (
     SELECT 'g4.fact.rows' AS check_name, CAST(counts['order_products_prior'] + counts['order_products_train'] AS BIGINT) AS expected,
       CAST((SELECT count(*)
@@ -96,17 +102,10 @@ USING (
       FROM e
     UNION ALL
     SELECT 'g4.fact.keys' AS check_name, CAST(0 AS BIGINT) AS expected,
-      CAST(((SELECT count(*)
-      FROM ((SELECT order_id, product_id
-      FROM fact)
-          EXCEPT ALL
-          (SELECT order_id, product_id
-      FROM all_items)) forward_diff) + (SELECT count(*)
-      FROM ((SELECT order_id, product_id
-      FROM all_items)
-          EXCEPT ALL
-          (SELECT order_id, product_id
-      FROM fact)) reverse_diff)) AS BIGINT) AS actual
+      (SELECT coalesce(sum(abs(coalesce(f.key_count, 0L) - coalesce(i.key_count, 0L))), 0L)
+      FROM fact_keys f
+      FULL OUTER JOIN item_keys i
+        ON f.order_id <=> i.order_id AND f.product_id <=> i.product_id) AS actual
       FROM e
   )
   SELECT CAST(:check_date AS DATE) AS check_date, check_name, expected, actual, (expected = actual) AS passed, current_timestamp() AS checked_at, :run_id AS run_id, :profile AS profile, 'G4' AS stage, (SELECT sha2(to_json(named_struct('catalog', :catalog, 'ops', :ops_schema, 'bronze', :bronze_schema, 'silver', :silver_schema, 'gold', :gold_schema, 'counts', array_sort(collect_list(named_struct('metric', metric, 'expected', expected, 'source', source))))), 256)

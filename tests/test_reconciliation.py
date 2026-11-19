@@ -206,7 +206,9 @@ def test_g3_g4_stages_require_fresh_prerequisites_and_do_not_add_daily_rows(reco
     )
     with pytest.raises(Exception, match="reconciliation failed"):
         recon.script("reconcile_g4.sql")
-    assert not checks(recon)["g4.fact.no_fanout"].passed
+    result = checks(recon)
+    assert not result["g4.fact.no_fanout"].passed
+    assert not result["g4.fact.keys"].passed and result["g4.fact.keys"].actual == 1
     recon.params["run_id"] = "run-b"
     with pytest.raises(Exception, match="prerequisite checks are stale"):
         recon.script("reconcile_g3.sql")
