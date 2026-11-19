@@ -9,6 +9,7 @@ from pyspark.sql import types as T
 from pyspark.sql.window import Window
 from rapidfuzz import fuzz
 
+from common.catalog_rows import canonical_products
 from common.dq import dq_failed
 from common.text import norm
 
@@ -128,15 +129,7 @@ def quarantine_off(assessed: DataFrame) -> DataFrame:
 
 def product_matches(products: DataFrame, candidates: DataFrame, match_score) -> DataFrame:
     """Chỉ chấm ứng viên crawler của đúng product_id; giữ cả sản phẩm chưa được tra."""
-    p = products.select(
-        F.expr("try_cast(product_id AS INT)").alias("product_id"),
-        "product_name",
-        _column(products, "_ingest_ts", "timestamp").alias("_ingest_ts"),
-    )
-    latest = Window.partitionBy("product_id").orderBy(
-        F.col("_ingest_ts").desc_nulls_last(), F.col("product_name").asc_nulls_last()
-    )
-    p = p.withColumn("_rn", F.row_number().over(latest)).where("_rn = 1").drop("_rn", "_ingest_ts")
+    p = canonical_products(products).select("product_id", "product_name")
     c = candidates.where(F.array_contains("countries_tags", "en:united-states")).select(
         "product_id", "off_code", "off_product_name", "brand"
     )

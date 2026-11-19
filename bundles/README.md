@@ -98,6 +98,11 @@ Notebook cài RapidFuzz ở ô đầu; không thêm cluster/job. Cách lấy s�
 [03d_nghiem_thu_off.md](../docs/de/03d_nghiem_thu_off.md). Số đo theo nhóm nằm ở
 [data dictionary §5.6](../docs/data/data_dictionary.md#56-cách-join-ghép-theo-tên-qua-bảng-cầu-nối).
 
+AD-DE-14 luôn đăng ký MV `dim_product` và chỉ đọc ba nguồn OFF khi bật `enable_off`. MV dùng
+`as_of_date` để chọn khuyến mãi. Giá hiện hành lấy từ SCD2, OFF/ảnh chỉ dùng matched, có fail guard
+cho fanout và xung đột nguồn. Không thêm cluster/job. Cách đối soát 49.688 khóa và coverage giá thật:
+[03e_nghiem_thu_dim_product.md](../docs/de/03e_nghiem_thu_dim_product.md). Đã kiểm trên dev với OFF tắt và bật.
+
 AD-DE-15 thêm `baskets` và views UC hợp nhất. Mặc định `enable_baskets=false`; chỉ bật
 khi hai bảng stream tồn tại đúng schema. Xem [nghiệm thu baskets](../docs/de/03f_nghiem_thu_baskets.md).
 
