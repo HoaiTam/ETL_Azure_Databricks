@@ -24,8 +24,10 @@ CI deploy dev bằng SP CI nên `<user>` khi đó là short name của SP, khác
   và event log có đồ thị chạy trước khi có bronze. Không dùng kết quả này để xác nhận ETL.
 - `bronze.py` (AD-DE-09) nạp sáu bảng CSV Instacart từ landing.
   Xem [nghiệm thu bronze](../docs/de/02b_nghiem_thu_bronze.md).
+- `silver_instacart.py` (AD-DE-12) thêm clock, header batch, AUTO CDC món prior và hai quarantine;
+  pipeline đặt session UTC. Xem [nghiệm thu đơn hàng](../docs/de/03c_nghiem_thu_orders.md).
 - `silver_retail.py` (AD-DE-11) thêm AUTO CDC SCD2 giá, SCD1 khuyến mãi và hai quarantine.
-  Khi có bronze CDC từ AD-DE-07, chạy theo [nghiệm thu retail](../docs/de/03b_nghiem_thu_retail.md).
+  Xem [nghiệm thu retail](../docs/de/03b_nghiem_thu_retail.md).
   `warehouse_id` đã khai báo cho AD-DE-18, pipeline hiện tại không dùng warehouse.
 - Schema prod, catalog, volume, warehouse, policy và quyền do Terraform/P1 quản lý.
   Schema dev tạo một lần bằng DDL bên dưới; bundle cleanup không sở hữu/xóa bốn schema này.

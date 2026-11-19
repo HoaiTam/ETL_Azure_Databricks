@@ -45,10 +45,7 @@ WITH ranked AS (
            eval_set,
            CAST(order_number AS INT) AS order_number,
            CAST(order_hour_of_day AS INT) AS order_hour_of_day,
-           CAST(coalesce(CAST(days_since_prior_order AS DOUBLE), 0) AS INT) AS dsp,
-           row_number() OVER (
-               PARTITION BY CAST(order_id AS BIGINT) ORDER BY _ingest_ts DESC
-           ) AS rn
+           CAST(coalesce(CAST(days_since_prior_order AS DOUBLE), 0) AS INT) AS dsp{extra_fields}{ranking}
     FROM {orders_table}
 ), back AS (
     SELECT *, coalesce(sum(dsp) OVER (
@@ -56,7 +53,7 @@ WITH ranked AS (
         ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING
     ), 0) AS days_back
     FROM ranked
-    WHERE rn = 1
+    {rank_filter}
 ), dated AS (
     SELECT *, date_sub(
         date_add(DATE'{anchor}', CAST(pmod(user_id * 7919, 30) AS INT)),
@@ -64,20 +61,35 @@ WITH ranked AS (
     ) AS sim_date
     FROM back
 )
-SELECT order_id, user_id, eval_set,
+SELECT order_id, user_id, eval_set{extra_output},
        make_timestamp_ltz(year(sim_date), month(sim_date), day(sim_date),
                           order_hour_of_day, 0, 0, 'UTC') AS order_ts_sim
 FROM dated
 """
 
 
-def order_time_sim_sql(orders_table: str) -> str:
+def order_time_sim_sql(orders_table: str, *, canonical: bool = False) -> str:
     """Dựng SELECT từ bảng bronze/view local, gồm đủ prior/train/test và _ingest_ts.
 
     Tên nguồn nhận 1–3 phần chưa quote, ví dụ instacart.p2_bronze.orders.
     Chỉ nhận identifier; không nhận đường dẫn file, biểu thức hoặc câu SQL.
+    Với canonical=True, nguồn đã qua DQ và duy nhất theo order_id, giữ cột header cho batch.
     """
     parts = orders_table.split(".")
     if not 1 <= len(parts) <= 3 or any(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", part) is None for part in parts):
         raise ValueError("orders_table phải là tên bảng gồm 1–3 identifier chưa quote")
-    return ORDER_TIME_SIM_SQL.format(orders_table=".".join(f"`{part}`" for part in parts), anchor=SIM_END_ANCHOR)
+    ranking = (
+        ", row_number() OVER (PARTITION BY CAST(order_id AS BIGINT) ORDER BY _ingest_ts DESC) AS rn"
+        if not canonical
+        else ""
+    )
+    return ORDER_TIME_SIM_SQL.format(
+        orders_table=".".join(f"`{part}`" for part in parts),
+        anchor=SIM_END_ANCHOR,
+        extra_fields=", order_dow, days_since_prior_order, _ingest_ts" if canonical else "",
+        ranking=ranking,
+        rank_filter="" if canonical else "WHERE rn = 1",
+        extra_output=", order_number, order_dow, order_hour_of_day, days_since_prior_order, _ingest_ts"
+        if canonical
+        else "",
+    )

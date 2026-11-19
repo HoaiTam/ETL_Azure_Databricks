@@ -210,24 +210,39 @@ from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
 from common.sim_time import order_time_sim_sql
+from common.instacart import ORDER_INPUT_RULES, assess_instacart, canonical_headers
 
 CAT    = spark.conf.get("catalog")
 BRONZE = f"{CAT}.{spark.conf.get('bronze')}"
 SILVER = f"{CAT}.{spark.conf.get('silver')}"
 
 
+@dp.temporary_view(name="order_headers_assessed")
+@dp.expect_all(ORDER_INPUT_RULES)
+def order_headers_assessed():
+    return assess_instacart(spark.read.table(f"{BRONZE}.orders"), "orders")
+
+
+@dp.temporary_view(name="order_headers_canonical")
+@dp.expect_all_or_fail(ORDER_INPUT_RULES)
+def order_headers_canonical():
+    return canonical_headers(spark.read.table("order_headers_assessed"))
+
+
 @dp.materialized_view(name=f"{SILVER}.order_time_sim",
                       comment="order_ts_sim tất định cho mọi đơn (prior/train/test)")
 @dp.expect_or_fail("has_ts", "order_ts_sim IS NOT NULL")
 def order_time_sim():
-    return spark.sql(order_time_sim_sql(f"{BRONZE}.orders"))
+    return spark.sql(order_time_sim_sql("order_headers_canonical", canonical=True))
 ```
 
-Truy vấn dùng `row_number()` trong CTE rồi lọc `rn = 1`, chống trùng theo `order_id`
-trước khi tính tổng ngày. Cách này chạy được trên Spark 3.5 local (không dùng `QUALIFY`).
-Cast `order_number` sang INT để đơn 10 không đứng trước đơn 2 khi bronze chứa STRING;
-cast `user_id` sang BIGINT trước phép nhân và `days_back` sang INT cho `date_sub`.
-`days_since_prior_order` đi qua DOUBLE để nhận được cả chuỗi `"14.0"` ở ANSI mode.
+Header vào clock đã qua DQ và duy nhất theo `order_id`. Ở chế độ canonical, truy vấn giữ
+payload header và bỏ xếp hạng lại theo đơn. `orders_batch` đọc trực tiếp từ clock đã tính.
+
+AD-DE-12 đánh giá DQ trên mọi bản header, rồi chọn một bản đạt DQ/ingest mới nhất cho mỗi order_id.
+Nếu không có bản hợp lệ cho một đơn thì clock bị chặn, không bỏ đơn đó rồi tính lịch sử thiếu.
+Clock luôn dùng **đủ prior/train/test**; chỉ lọc split khi dựng orders_batch. Raw payload lỗi vẫn
+được giữ ở quarantine_orders. Công thức SQL dùng lại nguyên helper của AD-DE-02.
 
 Pipeline batch viết toàn bộ bằng Python. Chỗ nào SQL dễ đọc hơn thì dùng `spark.sql(f"""…""")` bên trong hàm, tên catalog/schema lấy từ `spark.conf`. Như vậy không phải lo cú pháp thay biến `${…}` của file SQL trong LDP.
 
@@ -235,28 +250,27 @@ Pipeline batch viết toàn bộ bằng Python. Chỗ nào SQL dễ đọc hơn 
 
 ```python
 # src/pipelines/batch/silver_instacart.py  (tiếp)
-from common.dq import ITEM_RULES, ORDER_RULES
+from common.dq import ORDER_RULES
+from common.instacart import ITEM_COLUMNS, ITEM_INPUT_RULES, batch_orders
 
 
 @dp.materialized_view(name=f"{SILVER}.orders_batch",
                       comment="Header đơn prior/test từ batch; train đến từ stream",
                       cluster_by=["user_id"])
-@dp.expect_all_or_drop(ORDER_RULES)
+@dp.expect_or_fail("has_ts", "order_ts_sim IS NOT NULL")
 def orders_batch():
-    o = (spark.read.table(f"{BRONZE}.orders")
-         .where("eval_set IN ('prior', 'test')")
-         .dropDuplicates(["order_id"]))
-    t = spark.read.table(f"{SILVER}.order_time_sim").select("order_id", "order_ts_sim")
-    return (o.join(t, "order_id", "left")
-             .withColumn("source", F.lit("batch"))
-             .withColumn("is_test", F.col("eval_set") == "test")
-             .drop("_source_file", "_file_mtime"))
+    return batch_orders(spark.read.table(f"{SILVER}.order_time_sim"))
 
 
-@dp.temporary_view
-@dp.expect_all_or_drop(ITEM_RULES)
+@dp.temporary_view(name="order_items_prior_valid")
+@dp.expect_all_or_drop(ITEM_INPUT_RULES)
+def order_items_prior_valid():
+    return assess_instacart(spark.readStream.table(f"{BRONZE}.order_products_prior"), "items")
+
+
+@dp.temporary_view(name="order_items_prior_src")
 def order_items_prior_src():
-    return spark.readStream.table(f"{BRONZE}.order_products_prior")
+    return spark.readStream.table("order_items_prior_valid").select(*ITEM_COLUMNS)
 
 
 dp.create_streaming_table(name=f"{SILVER}.order_items_prior", cluster_by=["order_id"])
@@ -264,8 +278,8 @@ dp.create_auto_cdc_flow(
     target=f"{SILVER}.order_items_prior",
     source="order_items_prior_src",
     keys=["order_id", "product_id"],           # mỗi sản phẩm một lần trong một đơn
-    sequence_by=F.col("_ingest_ts"),
-    except_column_list=["_rescued_data", "_source_file", "_file_mtime"],
+    sequence_by=F.struct("_ingest_ts", "_file_mtime", "_source_file"),
+    except_column_list=["_rescued_data", "_ingest_ts", "_source_file", "_file_mtime"],
     stored_as_scd_type=1,
 )
 ```
@@ -275,6 +289,11 @@ dp.create_auto_cdc_flow(
 - Upsert theo khóa thì silver vẫn đúng 32.434.489 dòng.
 
 **Cái giá:** lần nạp đầu là một MERGE 32 triệu dòng, khoảng 10–20 phút trên 4 vCPU. Đo lại và ghi vào `ops.benchmark_results`.
+
+Con số 10–20 phút là ước lượng trong kế hoạch, chưa phải kết quả đo của AD-DE-12.
+Code thực tế ở [`silver_instacart.py`](../../src/pipelines/batch/silver_instacart.py), helper DQ/header ở
+[`common/instacart.py`](../../src/common/instacart.py). Xem [03c · Nghiệm thu silver đơn hàng](03c_nghiem_thu_orders.md)
+để chạy đối soát, thử replay và ghi thời gian MERGE đầu tiên; chưa có số đo workspace trong phiên triển khai.
 
 ## 4. Kiểm chất lượng: expectations và quarantine
 
@@ -306,7 +325,7 @@ def quarantine(name: str, source: str, rules: dict):
                 .withColumn("_quarantined_at", F.current_timestamp()))
 
 
-quarantine("order_items_prior", f"{BRONZE}.order_products_prior", ITEM_RULES)
+# Instacart dùng hai quarantine trong silver_instacart.py với cùng INPUT_RULES của nhánh xử lý.
 # Retail dùng quarantine chuyên biệt trong silver_retail.py, cùng rules với valid view.
 ```
 
