@@ -38,6 +38,11 @@ giá trị mặc định là `manual`. Job chạy một lượt tại một th�
 | `init_reconciliation` | Chỉ chạy khi cả pipeline và collector thành công. Tạo bảng và seed số kỳ vọng còn thiếu. |
 | `reconcile` | Chạy 22 check batch sau init. Dùng `job.run_id` và ngày UTC lúc job bắt đầu để repair trong cùng lượt giữ khóa ổn định. |
 
+Sau `reconcile`, `refresh_bi` chạy trên serverless với `ALL_SUCCESS`. Nếu upstream
+lỗi, `record_failed_batch` ghi nhánh audit riêng. Hai nhánh ghi `ops.pipeline_runs`
+theo cùng job run ID và lưu `adf_run_id` để đối chiếu ADF. Cấu hình và trạng thái API
+nằm ở [07 §7](07_power_bi.md#7-làm-mới-dữ-liệu-sau-mỗi-lần-pipeline-chạy).
+
 Task SQL dùng serverless warehouse `wh-instacart-bi` đã có. Tại G3 hiện tại, bundle giữ
 `enable_baskets=false`. Hai view, kiểm G3/G4 và `refresh_bi` được nối vào khi có đủ nguồn và task
 phụ thuộc. Chạy batch tách thời gian với crawler, seed và stream để vừa quota 4 vCPU.
