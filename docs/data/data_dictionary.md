@@ -506,3 +506,22 @@ giữ nguyên kết quả và đã đối chiếu bốn bảng quarantine. Còn 
 Hợp đồng, truy vấn điều tra và nghiệm thu:
 [DE/06 §3](../de/06_van_hanh_chay_lai.md#3-event-log-và-opsdq_results),
 [hướng dẫn collect_dq](../de/06b_nghiem_thu_dq.md).
+
+## 9. Cấu hình và kết quả đối soát (AD-DE-17)
+
+`ops.expected_counts` là bảng Delta thường, khóa logic profile/metric, có expected BIGINT không âm,
+source và configured_at. Chín metric: orders, order_products_prior, order_products_train, products,
+aisles, departments, orders_prior, orders_train, orders_test. Profile full seed tham chiếu không thay
+cho xác minh Zenodo; mẫu phải dùng manifest nguồn, không lấy số actual bronze làm chuẩn.
+
+`ops.reconciliation` có khóa logic **check_date DATE / check_name STRING**. Cột nghiệp vụ expected/actual
+BIGINT, passed BOOL, checked_at TIMESTAMP_LTZ; metadata run_id/profile/stage/config_hash STRING để phân
+biệt phạm vi và ngăn dùng lại check xanh cũ. Mọi cột NOT NULL, mỗi check lưu kết quả mới nhất trong ngày.
+Tách 22 batch / 25 G3 / 3 G4, không ghi stage chưa chạy như thể đã đạt. Hàng failed vẫn được lưu khi
+assert cuối làm task đỏ; repair cập nhật cùng khóa. Kết quả cùng run/hash mới đủ điều kiện mở cổng.
+
+Đã đối soát full release trên warehouse dev. Hai lượt đều ghi **22 check batch xanh** và giữ nguyên số khóa.
+Lượt thử sai kỳ vọng lưu được check đỏ. G3/G4 còn chờ đủ nguồn Silver và Gold.
+Cách cấu hình, thời gian và statement ID:
+[DE/06 §4](../de/06_van_hanh_chay_lai.md#4-đối-soát-tự-động-opsreconciliation),
+[06c_nghiem_thu_reconciliation.md](../de/06c_nghiem_thu_reconciliation.md).
