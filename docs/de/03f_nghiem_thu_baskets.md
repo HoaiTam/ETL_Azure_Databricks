@@ -86,7 +86,7 @@ Khi **full release và đã phát đủ train**, đối chiếu số thật:
 | baskets holdout | 131.209 giỏ |
 
 Nếu stream rỗng, chỉ có prior là trạng thái tạm hợp lệ, **chưa** đạt G3/đầu vào DS.
-`items ARRAY<BIGINT>` là tập mã sản phẩm tăng dần, n_items là kích thước tập, không phải số lượng mua.
+`items ARRAY<INT>` là tập mã sản phẩm tăng dần, n_items là kích thước tập, không phải số lượng mua.
 Snapshot AD-DE-20 cần kiểm miền số rồi cast tường minh sang schema INT của ds_data, không đổi mã khóa.
 
 ## Replay và lỗi

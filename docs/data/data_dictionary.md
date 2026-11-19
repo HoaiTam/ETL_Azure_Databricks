@@ -404,7 +404,7 @@ days_since_prior_order, order_ts_sim, source và is_test. Batch giữ prior/test
 thành order_ts_sim và gắn train/stream/is_test=false. `silver.order_items` có order_id, product_id,
 add_to_cart_order, reordered, source. Cả hai UNION ALL, không tự khử trùng hay tạo bản train batch.
 
-Baskets có năm cột nghiệp vụ: `order_id`, `user_id`, `split`, `items ARRAY<BIGINT>` tăng dần/duy nhất,
+Baskets có năm cột nghiệp vụ: `order_id`, `user_id`, `split`, `items ARRAY<INT>` tăng dần/duy nhất,
 `n_items INT = size(items)`. Khóa là order_id, chỉ có prior/holdout; header test không tạo basket.
 Không dùng n_items như số lượng mua: đây là số sản phẩm khác nhau trong giỏ.
 Các cột `_items_valid`, `_source_disjoint`, `dup_cnt` chỉ để kiểm chất lượng, không phải feature DS.
