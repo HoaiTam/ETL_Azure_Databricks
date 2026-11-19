@@ -84,10 +84,37 @@ qua `tests/fixtures/ivysettings.xml` và cache Ivy, nên lần đầu cần mạ
 Tests chạy nguyên file SQL, CREATE/MERGE Delta thật, JSON/STRUCT, late metrics và rollback dữ liệu lỗi.
 Nguồn metrics là dữ liệu tự dựng, không phải event log của engine LDP.
 
-**Chưa kiểm** warehouse UC thật, quyền, schema log/runtime thực tế, số liệu expectations/quarantine thật,
-collect của hai pipeline trên cloud hoặc job orchestration. CLI chưa có trên PATH, chưa chọn profile,
-#44/#48/#24/#22 còn chờ nghiệm thu. Giữ PR draft và issue #52 mở; không deploy prod/reset checkpoint.
+## Kết quả trên dev
 
+Ngày 2026-11-19, chạy `instacart_batch` với Bronze/Silver thực của AD-DE-11 và AD-DE-12.
+Lượt dev thường hoàn tất với checkpoint cũ và chỉ phát 2 event có expectation. Lượt có số đo dùng schema dev cách ly để đọc toàn bộ nguồn mà không reset bảng đang dùng.
+Event log là `23521394_dqreview_ops.event_log_batch`. Kết quả lấy trên [update batch](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/845539d8-e9cd-4ee5-b6dc-e9dd9bb5c8ff/updates/aabb2085-a4a4-4449-a192-9d593e0e5d44).
+
+Chạy `collect_dq.sql` hai lần trên warehouse dev. Event log có **47 khóa**
+expectation. `dq_results` khớp đầy đủ khóa và counter với từng event đã phát, có
+**270.271.755 lượt đạt** và **0 lượt lỗi**.
+Lượt hai giữ nguyên số dòng, counter, tên pipeline và timestamp của từng khóa.
+
+| Bảng quarantine | Số dòng | Số lỗi theo `_dq_failed` | Tổng `failed` từ expectation tương ứng |
+|---|---:|---:|---:|
+| `quarantine_orders` | 0 | 0 | 0 (`order_headers_assessed`) |
+| `quarantine_order_items_prior` | 0 | 0 | 0 (`order_items_prior_valid`) |
+| `quarantine_product_prices` | 0 | 0 | 0 (`product_prices_valid`) |
+| `quarantine_promotions` | 0 | 0 | 0 (`promotions_valid`) |
+
+Bốn bảng quarantine đều rỗng và expectation tương ứng đều ghi 0 lỗi. Các flow quarantine lọc dòng lỗi nên dùng counter của view kiểm nguồn để đối chiếu.
+
+| Flow | Dataset | Số khóa expectation |
+|---|---|---:|
+| `order_items_prior_scd1` | `order_items_prior_valid` | 6 |
+| `product_prices_scd2` | `product_prices_valid` | 9 |
+| `promotions_scd1` | `promotions_valid` | 10 |
+| `order_time_sim` | `order_time_sim` | 1 |
+| `order_time_sim` | `order_headers_assessed` | 10 |
+| `order_time_sim` | `order_headers_canonical` | 10 |
+| `orders_batch` | `orders_batch` | 1 |
+
+Còn chờ `event_log_stream` để nghiệm thu stream và tích hợp job điều phối.
 
 ### Nâng bảng dev đã tạo từ bản thử trước review
 

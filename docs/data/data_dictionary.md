@@ -429,7 +429,8 @@ RUNNING, loại event ID trùng; không dựng zero khi thiếu metrics. Một b
 view có thể được tính trong nhiều flow; SUM failed không phải số dòng quarantine. Khi fail dừng update,
 xem ERROR/violation thay vì suy ra số đếm không được emit. `at` là max event timestamp, không phải lúc thu.
 
-**Trạng thái 2026-11-17:** đã kiểm SQL MERGE bằng Delta local với event tự dựng; **chưa đo trên warehouse/LDP**
-và chưa đối chiếu quarantine thật. Hợp đồng, truy vấn điều tra và nghiệm thu:
+Đã nghiệm thu batch trên warehouse dev với **47 khóa expectation**. Hai lượt MERGE
+giữ nguyên kết quả và đã đối chiếu bốn bảng quarantine. Còn chờ event log stream.
+Hợp đồng, truy vấn điều tra và nghiệm thu:
 [DE/06 §3](../de/06_van_hanh_chay_lai.md#3-event-log-và-opsdq_results),
 [hướng dẫn collect_dq](../de/06b_nghiem_thu_dq.md).

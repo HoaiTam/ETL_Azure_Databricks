@@ -96,7 +96,8 @@ AD-DE-16 có `src/tasks/collect_dq.sql`, nhận catalog/ops_schema/event_log_tab
 thu batch hoặc stream vào cùng bảng Delta `ops.dq_results`. Task chạy trên warehouse serverless,
 do AD-DE-18 tích hợp điều phối sau; không tạo job/cluster trong thay đổi này.
 Hợp đồng counters, khóa có dataset và cách nghiệm thu chạy hai lần/quarantine:
-[06b_nghiem_thu_dq.md](../docs/de/06b_nghiem_thu_dq.md). Đã kiểm Delta local, chưa kiểm warehouse/LDP thật.
+[06b_nghiem_thu_dq.md](../docs/de/06b_nghiem_thu_dq.md). Đã kiểm batch trên warehouse dev với
+47 khóa expectation và bốn bảng quarantine. Còn chờ event log stream.
 
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
