@@ -397,6 +397,24 @@ Tỉ lệ khớp thực tế **chưa đo**, cần làm trong giai đoạn spike.
 | `silver.baskets`           | `order_items` gom theo đơn                                        | Đầu vào phần DS: `split = prior` để train, `holdout` để đánh giá |
 | `silver.quarantine_*`      | Bản ghi vi phạm luật chất lượng dữ liệu (mỗi nguồn một bảng) | Lưu lỗi kèm lý do (`_dq_failed`), không xóa im lặng                  |
 
+### 6.2 View hợp nhất và `silver.baskets` (AD-DE-15)
+
+`silver.orders` có order_id, user_id, eval_set, order_number, order_dow, order_hour_of_day,
+days_since_prior_order, order_ts_sim, source và is_test. Batch giữ prior/test; stream đổi event_time
+thành order_ts_sim và gắn train/stream/is_test=false. `silver.order_items` có order_id, product_id,
+add_to_cart_order, reordered, source. Cả hai UNION ALL, không tự khử trùng hay tạo bản train batch.
+
+Baskets có năm cột nghiệp vụ. `order_id INT` là khóa, `user_id INT` là mã khách,
+`split` nhận `prior` hoặc `holdout`, `items ARRAY<INT>` chứa mã sản phẩm duy nhất theo thứ tự tăng dần,
+và `n_items INT = size(items)` đếm số sản phẩm khác nhau. Header test không tạo giỏ.
+`_items_valid` kiểm tính hợp lệ của mã sản phẩm, `_source_disjoint` kiểm mã đơn holdout không xuất hiện
+ở batch, còn `dup_cnt` đếm giỏ theo mã đơn. Ba cột kỹ thuật phục vụ kiểm chất lượng.
+Header holdout đang chờ món được cảnh báo riêng. Snapshot AD-DE-20 kiểm miền số trước khi cast về INT.
+
+Mục tiêu full release sau khi phát đủ stream là **3.214.874 giỏ prior** và **131.209 giỏ holdout**.
+Còn chờ AD-ST-05 (#68) để chạy hai view trên warehouse và đối soát số giỏ thật theo
+[runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md).
+
 ## 7. Dữ liệu cho Data Science
 
 Chi tiết cách dựng ở [de/08](../de/08_du_lieu_cho_ds.md); cách dùng ở [ds/01](../ds/01_du_lieu_thuc_nghiem.md).

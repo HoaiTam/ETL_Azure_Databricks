@@ -99,5 +99,8 @@ Hợp đồng counters, khóa có dataset và cách nghiệm thu chạy hai lầ
 [06b_nghiem_thu_dq.md](../docs/de/06b_nghiem_thu_dq.md). Đã kiểm batch trên warehouse dev với
 47 khóa expectation và bốn bảng quarantine. Còn chờ event log stream.
 
+AD-DE-15 thêm `baskets` và views UC hợp nhất. Mặc định `enable_baskets=false`; chỉ bật
+khi hai bảng stream tồn tại đúng schema. Xem [nghiệm thu baskets](../docs/de/03f_nghiem_thu_baskets.md).
+
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
