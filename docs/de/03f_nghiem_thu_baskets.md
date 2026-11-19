@@ -109,9 +109,10 @@ Snapshot AD-DE-20 cần kiểm miền số rồi cast tường minh sang schema 
 Đã kiểm Spark 3.5 local, chạy nguyên SQL file có parameters hai lần và kiểm các biến đổi baskets bằng
 fixture prior/train/test. `dp` trong test kiểm wiring/điều kiện, không thay engine LDP/UC.
 
-Strict bundle validation và deploy pipeline trên dev đã đạt. Lượt chạy với `enable_baskets=false`
+Sau khi rebase lên main có AD-DE-10, strict bundle validation và deploy pipeline dev đã đạt.
+Bundle giữ `enable_off`, `off_root` và `enable_baskets`. Lượt chạy với `enable_baskets=false`
 kết thúc `COMPLETED`. Schema silver chưa có `baskets` trước và sau lượt chạy.
-[Update dev](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/29a729c1-a706-4866-bbe7-381d4b168ea0).
+[Update dev](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/89561b5f-9702-40ec-8720-4d4a0fa6d5a7).
 
 Issue #51 tiếp tục theo dõi AD-ST-05 (#68). Còn chờ bật baskets, chạy `create_views.sql` hai lần
 trên warehouse dev, đối soát đủ dòng full release và kiểm replay Delta/Event Hubs.
