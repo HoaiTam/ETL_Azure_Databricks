@@ -206,7 +206,8 @@ def test_statistics_always_include_three_labels_and_all_product_denominator(spar
     assert stats["matched"].pct_all_products == (0 if empty else 50)
 
 
-def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch):
+@pytest.mark.parametrize("enabled", [False, True])
+def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch, enabled):
     definitions = {}
 
     def mv(**options):
@@ -232,7 +233,12 @@ def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch):
             expect_all_or_fail=expect_all_or_fail,
         ),
     )
-    settings = {"catalog": "test-catalog", "bronze": "p2_bronze", "silver": "p2_silver"}
+    settings = {
+        "catalog": "test-catalog",
+        "bronze": "p2_bronze",
+        "silver": "p2_silver",
+        "enable_off": str(enabled).lower(),
+    }
     old = {key: spark.conf.get(key, None) for key in settings}
     try:
         for key, value in settings.items():
@@ -240,6 +246,10 @@ def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch):
         module = ModuleType("silver_off_under_test")
         source = ROOT / "src/pipelines/batch/silver_off.py"
         exec(compile(source.read_text(), str(source), "exec"), module.__dict__)
+        if not enabled:
+            assert not definitions
+            assert not hasattr(module, "match_score")
+            return
         assert module.score_series is score_series
         assert set(definitions) == {
             f"`test-catalog`.`p2_silver`.`{name}`"
