@@ -448,7 +448,8 @@ biệt phạm vi và ngăn dùng lại check xanh cũ. Mọi cột NOT NULL, m�
 Tách 22 batch / 25 G3 / 3 G4, không ghi stage chưa chạy như thể đã đạt. Hàng failed vẫn được lưu khi
 assert cuối làm task đỏ; repair cập nhật cùng khóa. Kết quả cùng run/hash mới đủ điều kiện mở cổng.
 
-**Trạng thái 2026-11-17:** kiểm SQL/MERGE Delta local bằng nguồn tự dựng, **chưa** đối soát full release,
-warehouse UC, stream đầy đủ hoặc gold thật. Hướng dẫn cấu hình và nghiệm thu:
+Đã đối soát full release trên warehouse dev. Hai lượt đều ghi **22 check batch xanh** và giữ nguyên số khóa.
+Lượt thử sai kỳ vọng lưu được check đỏ. G3/G4 còn chờ đủ nguồn Silver và Gold.
+Cách cấu hình, thời gian và statement ID:
 [DE/06 §4](../de/06_van_hanh_chay_lai.md#4-đối-soát-tự-động-opsreconciliation),
 [06c_nghiem_thu_reconciliation.md](../de/06c_nghiem_thu_reconciliation.md).

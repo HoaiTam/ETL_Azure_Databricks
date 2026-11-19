@@ -96,7 +96,8 @@ AD-DE-17 có init_reconciliation/reconcile/reconcile_g3/reconcile_g4 trong `src/
 chạy SQL warehouse theo profile kỳ vọng nguồn và run_id/check_date chung. Các stage đọc nguồn
 batch/G3/G4 tách riêng để không resolve bảng chưa có; AD-DE-18 sẽ tích hợp điều phối, chưa tạo job mới.
 Cách lấy kỳ vọng từ manifest và kiểm đủ inventory trước refresh_bi/ds-prepare:
-[06c_nghiem_thu_reconciliation.md](../docs/de/06c_nghiem_thu_reconciliation.md). Chưa nghiệm thu cloud.
+[06c_nghiem_thu_reconciliation.md](../docs/de/06c_nghiem_thu_reconciliation.md). Hai lượt batch trên
+warehouse dev đều đạt 22 check. G3/G4 còn chờ nguồn.
 
 AD-DE-16 có `src/tasks/collect_dq.sql`, nhận catalog/ops_schema/event_log_table/update_id,
 thu batch hoặc stream vào cùng bảng Delta `ops.dq_results`. Task chạy trên warehouse serverless,

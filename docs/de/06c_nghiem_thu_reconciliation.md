@@ -99,6 +99,15 @@ count/distinct thật, lần chạy lại, thử sai expectation và repair. Kh�
 
 ## Trạng thái hiện tại
 
-Đã kiểm SQL/Delta local với dữ liệu nhỏ, chưa chạy warehouse UC, dữ liệu đầy đủ, gold/LDP/Event Hubs,
-chưa đối soát G3 sau full replay. CLI chưa có trên PATH, chưa chọn profile; #50/#51/#70 còn chờ nghiệm thu.
-Giữ PR draft và issue #53 mở. Local dùng cấu hình Delta từ AD-DE-16, không thêm runtime hay cluster cloud.
+Ngày 2026-11-19, chạy trên warehouse dev với profile `instacart_2017` và schema ops cách ly. Nguồn là snapshot Bronze/Silver sau [update batch](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/7d05cb18-cfe9-46e8-9159-812a5ebffe6c).
+
+| Lượt | Statement ID | Thời gian | Kết quả |
+|---|---|---:|---|
+| Lần một | `01f1e40a-5a63-1d58-abd6-ff69466eecac` | 53,36 giây | MERGE ghi 22 check xanh |
+| Lần hai | `01f1e40a-859b-14e5-81f2-d2395fbfb7f4` | 43,85 giây | MERGE vẫn có 22 khóa, tất cả xanh |
+| Thử sai | `01f1e40a-c9f6-1ba3-b693-18dde291364d` | 4,62 giây | Assert thất bại. Đã lưu `bronze.products` với `passed=false` (49.689 kỳ vọng, 49.688 thực tế) |
+| Sau khi khôi phục | `01f1e40a-d7ff-1cec-b9fe-f4f074b4ed4e` | 42,82 giây | MERGE khôi phục 22 check xanh sau khi trả kỳ vọng về 49.688 |
+
+Thời gian là từ khi gửi từng statement đến khi nhận trạng thái cuối. Hai lần chạy dùng cùng ngày và run ID.
+Cổng G3/G4 còn chờ dữ liệu AD-DE-14, AD-DE-15, AD-ST-07 và bảng fact Gold. G4 dùng FULL OUTER JOIN
+trên số dòng của từng cặp khóa để kiểm cả khóa bị thiếu lẫn số lần xuất hiện bị lệch.
