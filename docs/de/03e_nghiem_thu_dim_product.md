@@ -6,22 +6,23 @@ MV ở [`silver_off.py`](../../src/pipelines/batch/silver_off.py), helper
 [`common/product.py`](../../src/common/product.py), test tại [`test_product.py`](../../tests/test_product.py).
 Pipeline `instacart_batch` nạp notebook qua glob hiện có; không thêm pipeline/job/cluster.
 
-Grain: một dòng mỗi sản phẩm Instacart. Tám bảng được đọc batch; giá/KM là snapshot các target
-AUTO CDC của AD-DE-11, không đọc stream hay tự MERGE trong dim. Chi tiết join/constraints ở
+Mỗi dòng là một sản phẩm Instacart. Luôn đọc danh mục và các snapshot giá/khuyến mãi
+AUTO CDC của AD-DE-11. Ba nguồn OFF chỉ được đọc khi bật `enable_off`. Hai chế độ công bố cùng schema. Chi tiết join/constraints ở
 [DE/03 §6](03_silver_cdc_scd_dq.md#6-dim_product-join-nhiều-nguồn-mà-không-nhân-dòng).
 
 ## Điều kiện và chạy dev
 
-- AD-DE-11 (#47), AD-DE-13 (#49), nguồn bronze và các quyền/schema/policy phải nghiệm thu.
+- Cần nguồn Bronze, retail AD-DE-11 và quyền/schema/policy. Chế độ bật OFF cần thêm AD-DE-13 và dữ liệu OFF.
   Đọc [retail](03b_nghiem_thu_retail.md), [OFF](03d_nghiem_thu_off.md) và
   [bundle](../../bundles/README.md). Dùng cùng catalog/schema/off_root đã resolve.
 - Cài CLI, đăng nhập và **để người chạy chọn profile**; không tự lấy profile đầu tiên.
 - `as_of_date` trong configuration phải là ISO `YYYY-MM-DD`; mặc định `2026-03-30`.
   Ngày này chỉ chọn khuyến mãi. Giá dim luôn là hàng SCD2 có `__END_AT IS NULL`, khác giá lịch sử của fact.
-- Trong `bundles/`, kiểm cấu hình resolve, deploy code rồi mới chạy:
+- Trong `bundles/`, kiểm cấu hình, deploy và chạy một lần cho mỗi chế độ. Lần đầu đặt `enable_off=false`.
+  Sau khi có lô OFF, lặp ba lệnh với `enable_off=true`.
 
 ```bash
-export BUNDLE_VAR_enable_off=true
+export BUNDLE_VAR_enable_off=false
 databricks bundle validate --strict -t dev --profile <profile>
 databricks bundle deploy -t dev --profile <profile>
 databricks bundle run -t dev --profile <profile> instacart_batch

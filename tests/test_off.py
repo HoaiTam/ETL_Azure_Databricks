@@ -254,7 +254,7 @@ def test_notebook_registers_mvs_and_uses_shared_scorer(spark, monkeypatch, tmp_p
         source = ROOT / "src/pipelines/batch/silver_off.py"
         exec(compile(source.read_text(), str(source), "exec"), module.__dict__)
         if not enabled:
-            assert not definitions
+            assert set(definitions) == {module.table_name("p2_silver", "dim_product"), "catalog_products_assessed"}
             assert not hasattr(module, "match_score")
             return
         assert module.score_series is score_series

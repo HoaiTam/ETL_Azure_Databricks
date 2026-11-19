@@ -413,8 +413,8 @@ Kết quả đo AD-DE-13 ở [data dictionary §5.6](../data/data_dictionary.md#
 ## 6. `dim_product`: join nhiều nguồn mà không nhân dòng
 
 MV khai báo trong [`silver_off.py`](../../src/pipelines/batch/silver_off.py), truy vấn batch nằm ở
-[`common/product.py`](../../src/common/product.py). Tám nguồn: products, aisles, departments,
-product_prices_history, promotions, product_off_match, off_products_clean và product_images.
+[`common/product.py`](../../src/common/product.py). Năm nguồn cơ sở gồm products, aisles, departments, product_prices_history và promotions.
+Khi bật OFF, đọc thêm product_off_match, off_products_clean và product_images.
 Bảng không tự ghi dữ liệu, không gọi action, không cần job/cluster riêng.
 
 ### 6.1 Grain và giá/khuyến mãi
@@ -426,7 +426,9 @@ Bảng không tự ghi dữ liệu, không gọi action, không cần job/cluste
   bản mới nhất và ghi cảnh báo. Nhiều payload khác nhau trong nhóm được ưu tiên cũng ghi cảnh báo.
 - Khóa sản phẩm NULL, không ép được sang INT hoặc không dương được đếm ở view
   `catalog_products_assessed` trước khi loại khỏi bridge và dimension.
-- Bật `enable_off=true` khi đường dẫn OFF đã có dữ liệu. Cờ này điều khiển cả bridge và `dim_product`.
+- `dim_product` luôn được đăng ký. Khi `enable_off=false`, dim chỉ đọc năm nguồn cơ sở, đặt các thuộc
+  tính OFF/ảnh thành NULL và giữ `off_match_status=no_match`, `off_match_score=0`.
+  Khi có dữ liệu OFF, bật `enable_off=true` để dùng thêm bridge, OFF sạch và ảnh.
 - Giá lấy **chỉ** hàng `__END_AT IS NULL`, giữ `unit_price` thành `current_price` DECIMAL và `currency`.
   Không lấy MAX giá, không dùng giá đã hết hiệu lực để bù thiếu. Nhiều hàng đang mở cho cùng sản phẩm
   là lỗi hợp đồng SCD2 và làm flow fail, kể cả hai hàng giống nhau.

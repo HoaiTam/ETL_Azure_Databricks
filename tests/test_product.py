@@ -14,7 +14,7 @@ from pyspark.sql import functions as F
 
 from common.catalog_rows import VALID_CATALOG_PRODUCT_ID
 from common.off import assess_off, clean_off
-from common.product import as_of_date, build_dim_product
+from common.product import OFF_ATTRIBUTES, as_of_date, build_dim_product
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -107,7 +107,9 @@ def sources(spark):
 
 
 def build(sources, date="2026-03-30"):
-    return build_dim_product(**sources, date=date)
+    base = {name: sources[name] for name in ("products", "aisles", "departments", "prices", "promotions")}
+    off_sources = (sources["matches"], sources["off"], sources["images"])
+    return build_dim_product(**base, date=date, off_sources=off_sources)
 
 
 def test_dimension_keeps_products_and_aggregates_active_promotions(sources):
@@ -206,7 +208,8 @@ def test_empty_optional_sources_still_keep_whole_catalog(sources):
     assert all(r.current_price is None and not r.on_promotion and r.off_match_status == "no_match" for r in rows)
 
 
-def test_notebook_reads_all_eight_batch_sources_and_wires_constraints(sources, spark, monkeypatch):
+@pytest.mark.parametrize("enable_off", ["false", "true"])
+def test_notebook_reads_configured_sources_and_wires_constraints(sources, spark, monkeypatch, enable_off):
     definitions, rules, warnings, reads = {}, {}, {}, []
 
     def mv(**options):
@@ -235,12 +238,13 @@ def test_notebook_reads_all_eight_batch_sources_and_wires_constraints(sources, s
             expect_or_fail=fail,
         ),
     )
+    monkeypatch.setattr("pyspark.cloudpickle.register_pickle_by_value", lambda _: None)
     settings = {
         "catalog": "qa-catalog",
         "bronze": "p2_bronze",
         "silver": "p2_silver",
         "as_of_date": "2026-03-31",
-        "enable_off": "true",
+        "enable_off": enable_off,
     }
     old = {key: spark.conf.get(key, None) for key in settings}
     try:
@@ -255,10 +259,15 @@ def test_notebook_reads_all_eight_batch_sources_and_wires_constraints(sources, s
             module.table_name("p2_bronze", "departments"): sources["departments"],
             module.table_name("p2_silver", "product_prices_history"): sources["prices"],
             module.table_name("p2_silver", "promotions"): sources["promotions"],
-            module.table_name("p2_silver", "product_off_match"): sources["matches"],
-            module.table_name("p2_silver", "off_products_clean"): sources["off"],
-            module.table_name("p2_bronze", "product_images"): sources["images"],
         }
+        if enable_off == "true":
+            mapping.update(
+                {
+                    module.table_name("p2_silver", "product_off_match"): sources["matches"],
+                    module.table_name("p2_silver", "off_products_clean"): sources["off"],
+                    module.table_name("p2_bronze", "product_images"): sources["images"],
+                }
+            )
 
         def read(name):
             reads.append(name)
@@ -269,7 +278,7 @@ def test_notebook_reads_all_eight_batch_sources_and_wires_constraints(sources, s
         module.spark = SimpleNamespace(read=SimpleNamespace(table=read), conf=spark.conf)
         fn, options = definitions[module.table_name("p2_silver", "dim_product")]
         output = fn()
-        assert set(reads) == {*mapping, "catalog_products_assessed"} and len(reads) == 9
+        assert set(reads) == {*mapping, "catalog_products_assessed"} and len(reads) == len(mapping) + 1
         assert options["cluster_by"] == ["product_id"]
         assert warnings["has_price"] == "current_price IS NOT NULL"
         assert warnings["catalog_payload_unique"] == "_catalog_sources_unique"
@@ -280,7 +289,16 @@ def test_notebook_reads_all_eight_batch_sources_and_wires_constraints(sources, s
             "unique_sources": "_join_sources_unique",
             "valid_product_id": "product_id IS NOT NULL AND product_id > 0",
         }
-        assert output.where("product_id = 1").first().discount_pct == 99
+        row = output.where("product_id = 1").first()
+        assert row.discount_pct == 99 and row.current_price == Decimal("3.40")
+        if enable_off == "false":
+            assert output.dtypes == build(sources).dtypes
+            assert output.count() == 6
+            assert output.where("off_match_status = 'no_match' AND off_match_score = 0").count() == 6
+            attributes = ("off_code", *OFF_ATTRIBUTES, "image_path")
+            assert output.where(" OR ".join(f"{name} IS NOT NULL" for name in attributes)).count() == 0
+        else:
+            assert row.off_match_status == "matched" and row.image_path == "/a.jpg"
         assert output.where(" OR ".join(f"NOT ({p})" for p in rules.values())).count() == 0
     finally:
         for key, value in old.items():
