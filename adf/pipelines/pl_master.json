@@ -1,0 +1,159 @@
+[
+  {
+    "name": "ingest_retail_db",
+    "description": "Chờ CDC của retail_db công bố xong lên landing.",
+    "type": "ExecutePipeline",
+    "typeProperties": {
+      "pipeline": {
+        "referenceName": "pl_ingest_retail_db",
+        "type": "PipelineReference"
+      },
+      "waitOnCompletion": true
+    }
+  },
+  {
+    "name": "ingest_off",
+    "description": "Chờ dữ liệu và ảnh OFF được công bố sau khi CDC hoàn tất.",
+    "type": "ExecutePipeline",
+    "dependsOn": [
+      {
+        "activity": "ingest_retail_db",
+        "dependencyConditions": ["Succeeded"]
+      }
+    ],
+    "typeProperties": {
+      "pipeline": {
+        "referenceName": "pl_ingest_off",
+        "type": "PipelineReference"
+      },
+      "parameters": {
+        "off_source": {
+          "type": "Expression",
+          "value": "@pipeline().parameters.off_source"
+        }
+      },
+      "waitOnCompletion": true
+    }
+  },
+  {
+    "name": "run_batch_medallion",
+    "description": "Chạy job instacart-batch-medallion sau khi CDC và OFF đã hoàn tất.",
+    "type": "DatabricksJob",
+    "dependsOn": [
+      {
+        "activity": "ingest_off",
+        "dependencyConditions": ["Succeeded"]
+      }
+    ],
+    "linkedServiceName": {
+      "referenceName": "ls_dbx",
+      "type": "LinkedServiceReference"
+    },
+    "policy": {
+      "timeout": "0.04:00:00",
+      "retry": 0
+    },
+    "typeProperties": {
+      "jobId": {
+        "type": "Expression",
+        "value": "@pipeline().parameters.batch_job_id"
+      },
+      "jobParameters": {
+        "adf_run_id": {
+          "type": "Expression",
+          "value": "@pipeline().RunId"
+        }
+      }
+    }
+  },
+  {
+    "name": "notify_failure",
+    "description": "Gửi một thông báo tùy cấu hình khi CDC, OFF hoặc job batch lỗi.",
+    "type": "IfCondition",
+    "dependsOn": [
+      {
+        "activity": "run_batch_medallion",
+        "dependencyConditions": ["Failed", "Skipped"]
+      }
+    ],
+    "typeProperties": {
+      "expression": {
+        "type": "Expression",
+        "value": "@not(empty(trim(pipeline().parameters.failure_webhook_vault)))"
+      },
+      "ifTrueActivities": [
+        {
+          "name": "read_failure_webhook",
+          "description": "Lấy URL thông báo từ Key Vault bằng managed identity của ADF.",
+          "type": "WebActivity",
+          "policy": {
+            "timeout": "0.00:10:00",
+            "retry": 0,
+            "secureOutput": true
+          },
+          "typeProperties": {
+            "method": "GET",
+            "url": {
+              "type": "Expression",
+              "value": "@concat('https://', uriComponent(trim(pipeline().parameters.failure_webhook_vault)), '.vault.azure.net/secrets/adf-batch-failure-webhook?api-version=7.5')"
+            },
+            "authentication": {
+              "type": "MSI",
+              "resource": "https://vault.azure.net"
+            }
+          }
+        },
+        {
+          "name": "post_failure_notification",
+          "description": "Gửi tên pipeline và RunId đến endpoint thông báo.",
+          "type": "WebActivity",
+          "dependsOn": [
+            {
+              "activity": "read_failure_webhook",
+              "dependencyConditions": ["Succeeded"]
+            }
+          ],
+          "policy": {
+            "timeout": "0.00:10:00",
+            "retry": 0,
+            "secureInput": true,
+            "secureOutput": true
+          },
+          "typeProperties": {
+            "method": "POST",
+            "turnOffAsync": true,
+            "url": {
+              "type": "Expression",
+              "value": "@activity('read_failure_webhook').output.value"
+            },
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "type": "Expression",
+              "value": "@concat('{\"pipeline\":\"pl_master\",\"adf_run_id\":\"', pipeline().RunId, '\",\"text\":\"ADF pl_master thất bại. RunId ', pipeline().RunId, '\"}')"
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "fail_master",
+    "description": "Giữ trạng thái lỗi dù thông báo được gửi, bị bỏ qua hoặc thất bại.",
+    "type": "Fail",
+    "dependsOn": [
+      {
+        "activity": "notify_failure",
+        "dependencyConditions": ["Completed"]
+      }
+    ],
+    "typeProperties": {
+      "errorCode": "MASTER_BATCH_FAILED",
+      "message": {
+        "type": "Expression",
+        "value": "@concat('pl_master thất bại. Xem activity lỗi trong ADF Monitor, RunId ', pipeline().RunId)"
+      }
+    }
+  }
+]

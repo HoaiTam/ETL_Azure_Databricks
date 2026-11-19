@@ -9,6 +9,7 @@ on:
       - 'scripts/build_retail_cdc_adf.py'
       - 'tests/adf_runtime.py'
       - 'tests/test_adf_instacart.py'
+      - 'tests/test_adf_batch_orchestration.py'
       - 'tests/test_retail_cdc_adf.py'
       - '.github/workflows/adf-checks.yml'
   workflow_dispatch:
@@ -32,4 +33,6 @@ jobs:
           uv run --frozen --with azure-mgmt-datafactory==9.2.0 python scripts/build_instacart_adf.py --check --sdk-check
           uv run --frozen --with azure-mgmt-datafactory==9.2.0 python scripts/build_retail_cdc_adf.py --check --sdk-check
       - name: Kiểm luồng trên file local
-        run: uv run --frozen pytest tests/test_adf_instacart.py tests/test_retail_cdc_adf.py -q
+        run: >-
+          uv run --frozen pytest
+          tests/test_adf_instacart.py tests/test_retail_cdc_adf.py tests/test_adf_batch_orchestration.py -q
