@@ -217,7 +217,11 @@ for _table in ("product_prices", "promotions"):
 
 ### 3.3 Open Food Facts: JSON lồng nhau và ảnh
 
-`OFF_ROOT` dùng cùng đường dẫn với crawler. Pipeline mặc định `enable_off=false`. Sau khi đã có JSONL và nhánh ảnh trên landing, truyền `BUNDLE_VAR_enable_off=true` khi deploy target tương ứng.
+`OFF_ROOT` dùng cùng đường dẫn với crawler. Pipeline mặc định `enable_off=false`.
+Trên dev, truyền `BUNDLE_VAR_enable_off=true` sau khi đã có JSONL và nhánh ảnh trên landing.
+Trên prod, sau lượt crawl đầu tiên tạo dữ liệu, mở PR đặt `enable_off: "true"` trong
+`targets.prod.variables` của [bundles/databricks.yml](../../bundles/databricks.yml).
+CI triển khai cấu hình prod sau khi PR được duyệt và merge.
 
 ```python
 @dp.table(name=f"{BRONZE}.off_products",

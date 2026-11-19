@@ -100,11 +100,13 @@ class OffClient:
         self.session = session or requests.Session()
         self.limiter = limiter or RateLimiter()
         self.sleep, self.max_requests = sleep, max_requests
+        self.requests_sent = 0
 
     def get(self, url, *, limiter=None, **kwargs):
         """Không theo redirect; response lỗi được đóng trước khi đợi/retry."""
         for attempt in range(self.max_requests):
             (limiter or self.limiter).wait()
+            self.requests_sent += 1
             try:
                 response = self.session.get(
                     url, headers={"User-Agent": USER_AGENT}, timeout=(10, 30), allow_redirects=False, **kwargs
@@ -283,8 +285,10 @@ def main():
         client = OffClient(session)
         if args.mode == "crawl":
             summary = run_batch(root, state, client, n=args.batch_size, top=args.top)
+            summary["search_requests"] = client.requests_sent
         else:
             summary = download_images(root, state.batch_files(), client)
+            summary["image_requests"] = client.requests_sent
     print(json.dumps(summary, ensure_ascii=False))
 
 

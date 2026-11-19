@@ -151,6 +151,7 @@ def test_http_retries_429_and_503_and_spaces_every_request():
     responses = [Response(429, headers={"Retry-After": "1"}), Response(503), Response(payload={"hits": []})]
     client, session, _ = http_client(responses)
     assert client.search('Tea "Green" + Lime') == []
+    assert client.requests_sent == len(session.calls) == 3
     times = [call[0] for call in session.calls]
     assert times[0] >= 6.5
     assert all(right - left >= 6.5 for left, right in zip(times, times[1:], strict=False))
@@ -207,7 +208,9 @@ def test_replay_does_not_search_terminal_products_and_no_empty_json_is_published
     assert summary == {"selected": 2, "done": 1, "no_result": 1, "retry": 0, "failed": 0, "invalid_hits": 0}
     before = {path: path.read_bytes() for path in (tmp_path / "products").rglob("*.json")}
     assert len(before) == 1 and next(iter(before.values())).count(b"\n") == 1
-    assert run_batch(tmp_path, state, Search([])) == {"selected": 0, "invalid_hits": 0}
+    replay, session, _ = http_client([])
+    assert run_batch(tmp_path, state, replay) == {"selected": 0, "invalid_hits": 0}
+    assert replay.requests_sent == len(session.calls) == 0
     assert before == {path: path.read_bytes() for path in (tmp_path / "products").rglob("*.json")}
     assert len(client.names) == 2
     assert state.rows[2]["batch_file"] is None

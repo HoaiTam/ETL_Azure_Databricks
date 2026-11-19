@@ -219,7 +219,7 @@ khác 0 sau update pipeline. Tách kiểm repair từng task khỏi chạy lô m
 chạy job mới sẽ chọn sản phẩm **khác**, không nhất thiết là no-op toàn job.
 
 Lô dev đã xác nhận MERGE Delta và rename trên UC Volume Azure với 5 sản phẩm, 1 JSONL và 17 ảnh.
-Pipeline batch mặc định `enable_off=false` để chạy được trước lượt crawl đầu. Khi có JSONL và
+Pipeline batch mặc định `enable_off=false` để chạy được trước lượt crawl đầu. Khi dev có JSONL và
 nhánh ảnh, chạy từ `bundles/`:
 
 ```bash
@@ -227,7 +227,12 @@ BUNDLE_VAR_enable_off=true databricks bundle deploy -t dev
 BUNDLE_VAR_enable_off=true databricks bundle run -t dev instacart_batch
 ```
 
-Đối soát số dòng OFF và ảnh theo update. Nghiệm thu G3 vẫn cần lô 300 và kiểm chạy lại.
+Trên prod, sau lượt crawl đầu tiên tạo dữ liệu, mở PR đặt `enable_off: "true"` trong
+`targets.prod.variables` của [bundles/databricks.yml](../../bundles/databricks.yml).
+CI triển khai cấu hình prod sau khi PR được duyệt và merge.
+
+Đối soát số dòng OFF và ảnh theo update. Log crawler có `search_requests`, gồm các lần retry.
+Log ảnh có `image_requests` và `downloaded`. Kiểm chạy lại với cùng giới hạn top đã nghiệm thu.
 
 Kiểm local: `uv run pytest tests/test_off_crawler.py tests/test_off_state.py tests/test_bronze.py -q`.
 Tests dùng HTTP giả lập/filesystem local/Spark thật cho chọn lô/bootstrap; SQL MERGE chỉ được parse và
