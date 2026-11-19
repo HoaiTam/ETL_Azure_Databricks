@@ -473,9 +473,8 @@ Nguồn lỗi vẫn giữ trong bronze/silver; dim không xóa hay sửa ngượ
 flow khác cùng update rollback; bảng dim có thể còn phiên bản thành công cũ, phải kiểm update ID.
 
 Release đầy đủ phải có **49.688 dòng / 49.688 khóa**, không phải mọi fixture đều có số này.
-Tỉ lệ `has_price` phải đo thật và báo cả tử/mẫu số; hiện **chưa nghiệm thu trên workspace**.
-Đọc [03e_nghiem_thu_dim_product.md](03e_nghiem_thu_dim_product.md) để chạy dev, đối soát, replay
-và ghi bằng chứng. AD-DE-11 (#47) và AD-DE-13 (#49) vẫn là gate hoàn tất.
+Đã nghiệm thu đủ số dòng và số khóa trên dev với OFF tắt và bật. Xem tử/mẫu số `has_price`,
+pipeline update và cách replay trong [runbook dim_product](03e_nghiem_thu_dim_product.md).
 
 ## 7. Gộp batch ∪ stream và dựng `baskets`
 

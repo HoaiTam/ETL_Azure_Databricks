@@ -441,8 +441,9 @@ OFF ghép theo cặp product_id/off_code; cùng barcode không cho phép lấy p
 Giá là giá **hiện hành**, không phải giá lịch sử tại ngày đặt đơn; xem AD-DE-22 cho join theo thời điểm.
 Ngày cấu hình chỉ quyết định khuyến mãi; khuyến mãi 0% vẫn có on_promotion=true.
 
-Strict bundle validation dev đã đạt. **Chưa đo trên workspace** số dòng, số khóa và coverage `has_price`.
-Cách đo và báo tử/mẫu số trên dữ liệu thật:
+Đã nghiệm thu trên dev với **49.688 dòng và 49.688 khóa** ở cả hai chế độ. Khi OFF tắt,
+mọi thuộc tính OFF/ảnh là NULL, trạng thái là `no_match` và điểm bằng 0.
+Số đo `has_price` và update ID:
 [nghiệm thu dim_product](../de/03e_nghiem_thu_dim_product.md).
 
 Guard của `silver.dim_product`: `dup_cnt` là số dòng sau join cho mỗi product_id,

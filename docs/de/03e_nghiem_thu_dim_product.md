@@ -95,6 +95,16 @@ Kiểm thêm một mẫu:
 
 Đã kiểm Spark local với fixture tự dựng, gồm thiếu nguồn, replay, xung đột và join OFF cùng barcode.
 Test đăng ký `dp`/điều kiện expectations không thay engine LDP hoặc transaction Delta.
-`bundle validate --strict -t dev` đã đạt với cờ OFF tắt và bật, dùng xác thực Azure CLI.
-**Chưa kiểm** update dimension trên workspace, full release 49.688 khóa, coverage has_price,
-event log và replay Delta. PR #159 còn mở. Coverage trong runbook cần đo trên dữ liệu thật.
+
+Đo trên catalog dev ngày 2026-11-19 với commit `672f6e0`.
+Strict validation, deploy và hai lượt batch đều thành công.
+
+| `enable_off` | Pipeline update | Số dòng | Khóa `product_id` | `has_price` | Dòng có dữ liệu OFF |
+|---|---|---:|---:|---:|---:|
+| `false` | [Update `d94b95c1`](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/d94b95c1-13f2-47b9-87d9-7a9ab5ad15ca) | 49.688 | 49.688 | 49.688 / 49.688 (100,0000%) | 0 |
+| `true` | [Update `7ec7d6c7`](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/7ec7d6c7-bccb-4269-b35e-5654f4891bb9) | 49.688 | 49.688 | 49.688 / 49.688 (100,0000%) | 259 |
+
+OFF tắt cho **49.688** dòng `no_match` với điểm 0, toàn bộ thuộc tính OFF và ảnh là NULL.
+OFF bật dùng lô 305 sản phẩm. **259** sản phẩm có nhãn `matched` và được làm giàu.
+
+Còn chờ kiểm replay Delta và triển khai prod.

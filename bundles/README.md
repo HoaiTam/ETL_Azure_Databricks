@@ -101,7 +101,7 @@ Notebook cài RapidFuzz ở ô đầu; không thêm cluster/job. Cách lấy s�
 AD-DE-14 luôn đăng ký MV `dim_product` và chỉ đọc ba nguồn OFF khi bật `enable_off`. MV dùng
 `as_of_date` để chọn khuyến mãi. Giá hiện hành lấy từ SCD2, OFF/ảnh chỉ dùng matched, có fail guard
 cho fanout và xung đột nguồn. Không thêm cluster/job. Cách đối soát 49.688 khóa và coverage giá thật:
-[03e_nghiem_thu_dim_product.md](../docs/de/03e_nghiem_thu_dim_product.md); chưa kiểm workspace.
+[03e_nghiem_thu_dim_product.md](../docs/de/03e_nghiem_thu_dim_product.md). Đã kiểm trên dev với OFF tắt và bật.
 
 Tham khảo: [resource bundle chính thức](https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/resources),
 [event log pipeline](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
