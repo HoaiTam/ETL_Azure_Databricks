@@ -31,6 +31,7 @@ resources:
         as_of_date: "2026-03-30"
         spark.sql.session.timeZone: UTC
         enable_baskets: ${var.enable_baskets}
+        enable_gold_fact: ${var.enable_gold_fact}
         pipelines.clusterShutdown.delay: 60s
       event_log:
         catalog: ${var.catalog}
