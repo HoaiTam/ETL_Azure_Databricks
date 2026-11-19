@@ -226,7 +226,7 @@ WITH flow_events AS (
   SELECT timestamp AS event_ts,
     get_json_object(to_json(named_struct('v', origin)), '$.v.flow_name') AS flow_name,
     get_json_object(to_json(named_struct('v', origin)), '$.v.update_id') AS update_id,
-    get_json_object(to_json(named_struct('v', details)), '$.v.flow_progress.status') AS flow_status
+    get_json_object(get_json_object(to_json(named_struct('v', details)), '$.v'), '$.flow_progress.status') AS flow_status
   FROM IDENTIFIER(
     '`' || replace(:catalog, '`', '``') || '`.`' || replace(:ops_schema, '`', '``') || '`.event_log_batch'
   )
