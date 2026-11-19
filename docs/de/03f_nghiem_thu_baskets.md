@@ -7,25 +7,27 @@
 - MV `silver.baskets` của pipeline batch ở cuối
   [`silver_instacart.py`](../../src/pipelines/batch/silver_instacart.py), helper
   [`common/baskets.py`](../../src/common/baskets.py) đọc trực tiếp bốn bảng silver, không đọc view.
-- Cần nghiệm thu AD-DE-12 (#48), AD-ST-05 (#68), quyền/catalog/schema/policy/warehouse.
-  #68 chưa có code triển khai trên main/nhánh nền; test chỉ dựng schema stream theo DE/04 §4.1.
-  Không tạo target stream giả trong pipeline batch để vượt lỗi thiếu bảng.
+- AD-DE-12 (#48) đã hoàn tất. Bật giỏ và nghiệm thu dữ liệu thật sau khi AD-ST-05 (#68)
+  có đủ hai bảng stream đúng schema.
 
-Lần bootstrap: chạy phần batch AD-DE-12 để materialize nguồn batch; triển khai/chạy stream AD-ST-05
-để có hai target stream đúng schema (có thể rỗng nhưng phải tồn tại); sau đó mới cập nhật code AD-DE-15.
+Lần bootstrap: chạy batch với `enable_baskets=false` (mặc định) để tạo nguồn batch.
+Sau khi triển khai và chạy AD-ST-05, bật `enable_baskets` cho lần deploy dev tiếp theo.
 Giữ cùng catalog và schema silver đã resolve giữa hai pipeline. Hai target header/items stream là hai
 flow riêng. Header đến trước món được đếm cảnh báo và tạm bỏ khỏi MV; chỉ prior rỗng làm fail.
 Giỏ đang chờ sẽ xuất hiện ở lần chạy sau khi món đã commit.
 
 ## Chạy dev và hai view
 
-Sau khi có CLI/profile **do người chạy chọn**, trong `bundles/`:
+Trong `bundles/`, kiểm chế độ mặc định trước khi có hai bảng stream:
 
 ```bash
 databricks bundle validate --strict -t dev --profile <profile>
 databricks bundle deploy -t dev --profile <profile>
 databricks bundle run -t dev --profile <profile> instacart_batch
 ```
+
+Update ở chế độ mặc định phải thành công và schema silver chưa có `baskets`. Khi hai bảng stream
+đã sẵn sàng, deploy dev với `BUNDLE_VAR_enable_baskets=true`, chạy lại batch và chuẩn bị đối soát.
 
 Chạy SQL file trên warehouse **serverless** `wh-instacart-bi` bằng danh tính có quyền đọc cả bốn bảng
 nguồn, tạo/thay view trong schema dev theo quyền của AD-OPS-20. Điền hai named parameters STRING:
@@ -106,7 +108,5 @@ Snapshot AD-DE-20 cần kiểm miền số rồi cast tường minh sang schema 
 
 Đã kiểm Spark 3.5 local, chạy nguyên SQL file có parameters hai lần và kiểm các biến đổi baskets bằng
 fixture prior/train/test. `dp` trong test kiểm wiring/điều kiện, không thay engine LDP/UC.
-**Chưa kiểm** warehouse thật, validate/deploy/update, đủ dòng full release, event log và replay Delta/Event Hubs.
-CLI chưa có trên PATH, chưa chọn profile; #48/#68 chưa nghiệm thu. Giữ PR draft và issue #51 mở.
-
-Bật `BUNDLE_VAR_enable_baskets=true` cho deploy dev sau khi đã xác nhận hai bảng stream. Mặc định bundle giữ false để pipeline batch chạy trước AD-ST-05.
+Issue #51 tiếp tục theo dõi AD-ST-05 (#68). Còn chờ bật baskets, chạy `create_views.sql` hai lần
+trên warehouse dev, đối soát đủ dòng full release và kiểm replay Delta/Event Hubs.

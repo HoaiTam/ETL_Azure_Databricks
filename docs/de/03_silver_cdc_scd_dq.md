@@ -491,11 +491,11 @@ MV ở cuối [`silver_instacart.py`](../../src/pipelines/batch/silver_instacart
 - orders_batch lọc eval_set=prior + order_items_prior → split `prior` để học luật.
 - stream_orders + stream_order_items → split `holdout` để đánh giá.
 - Không đọc hai view UC để tránh vòng phụ thuộc bootstrap. Target stream phải tồn tại đúng schema
-  trước update batch phiên bản này; thiếu target thì báo lỗi, không tạo bảng giả hay thay quyền sở hữu.
+  trước khi bật `enable_baskets=true`. Cờ mặc định là `false` để batch vẫn chạy khi stream chưa sẵn sàng.
 - Giữ mọi header đủ điều kiện bằng LEFT JOIN món. Header chưa có món có `items=[]`, n_items=0 và
   làm check `non_empty_prior_basket` fail ở prior. Ở holdout, header chờ món chỉ cảnh báo trong
   `basket_candidates` và được đưa vào basket ở update sau khi items đã commit.
-- `items = array_sort(collect_set(product_id))`, kiểu ARRAY<BIGINT>; `n_items = size(items)`.
+- `items = array_sort(collect_set(product_id))`, kiểu `ARRAY<INT>`; `n_items = size(items)`.
   Món trùng do replay không làm tăng n_items; danh sách là tập sản phẩm, không phải số lượng mua.
   Bản sao header cùng order_id/user_id được gộp, header cùng mã nhưng khác user bị fail.
 - Giữ cờ kiểm tra kỹ thuật để fail khi có sản phẩm NULL/không dương, khóa header sai,
@@ -512,8 +512,7 @@ Giỏ rỗng trong lúc stream mới cập nhật một target chưa phải mấ
 rồi chạy lại batch. Một update thất bại có thể để lại MV phiên bản thành công cũ; kiểm update ID.
 
 Hướng dẫn bootstrap, chạy SQL hai lần trên warehouse, đối soát và replay:
-[03f_nghiem_thu_baskets.md](03f_nghiem_thu_baskets.md). **Chưa nghiệm thu trên workspace**;
-AD-DE-12 (#48) và AD-ST-05 (#68) còn là gate hoàn tất.
+[03f_nghiem_thu_baskets.md](03f_nghiem_thu_baskets.md). Còn chờ AD-ST-05 (#68) để bật giỏ và nghiệm thu với stream thật.
 Tham khảo [IDENTIFIER](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-names-identifier-clause)
 và [USE](https://learn.microsoft.com/en-us/azure/databricks/sql/language-manual/sql-ref-syntax-ddl-use-schema).
 

@@ -404,20 +404,16 @@ days_since_prior_order, order_ts_sim, source và is_test. Batch giữ prior/test
 thành order_ts_sim và gắn train/stream/is_test=false. `silver.order_items` có order_id, product_id,
 add_to_cart_order, reordered, source. Cả hai UNION ALL, không tự khử trùng hay tạo bản train batch.
 
-Baskets có năm cột nghiệp vụ: `order_id`, `user_id`, `split`, `items ARRAY<INT>` tăng dần/duy nhất,
-`n_items INT = size(items)`. Khóa là order_id, chỉ có prior/holdout; header test không tạo basket.
-Không dùng n_items như số lượng mua: đây là số sản phẩm khác nhau trong giỏ.
-Các cột `_items_valid`, `_source_disjoint`, `dup_cnt` chỉ để kiểm chất lượng, không phải feature DS.
-Snapshot DS ở AD-DE-20 cần kiểm miền số và cast tường minh sang schema ARRAY<INT>/khóa INT đã chốt.
+Baskets có năm cột nghiệp vụ. `order_id INT` là khóa, `user_id INT` là mã khách,
+`split` nhận `prior` hoặc `holdout`, `items ARRAY<INT>` chứa mã sản phẩm duy nhất theo thứ tự tăng dần,
+và `n_items INT = size(items)` đếm số sản phẩm khác nhau. Header test không tạo giỏ.
+`_items_valid` kiểm tính hợp lệ của mã sản phẩm, `_source_disjoint` kiểm mã đơn holdout không xuất hiện
+ở batch, còn `dup_cnt` đếm giỏ theo mã đơn. Ba cột kỹ thuật phục vụ kiểm chất lượng.
+Header holdout đang chờ món được cảnh báo riêng. Snapshot AD-DE-20 kiểm miền số trước khi cast về INT.
 
-Mục tiêu full release: prior **3.214.874**, holdout **131.209** sau khi phát đủ stream.
-**Trạng thái 2026-11-17: chưa đo trên workspace**. AD-DE-12 (#48), AD-ST-05 (#68) chưa nghiệm thu;
-fixture không thay được số thật. Hướng dẫn đối soát SQL/view/baskets và replay:
-[03f_nghiem_thu_baskets.md](../de/03f_nghiem_thu_baskets.md).
-
-`silver.baskets` lưu `order_id INT`, `user_id INT`, `items ARRAY<INT>`. Guard `_items_valid`
-xác nhận tất cả product_id hợp lệ, `_source_disjoint` xác nhận order_id holdout không có ở batch,
-và `dup_cnt` đếm giỏ có thể công bố theo order_id. Header holdout đang chờ món được cảnh báo riêng.
+Mục tiêu full release sau khi phát đủ stream là **3.214.874 giỏ prior** và **131.209 giỏ holdout**.
+Còn chờ AD-ST-05 (#68) để chạy hai view trên warehouse và đối soát số giỏ thật theo
+[runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md).
 
 ## 7. Dữ liệu cho Data Science
 
