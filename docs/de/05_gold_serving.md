@@ -38,160 +38,67 @@
 
 ### 2.1 Fact có giá theo thời điểm (point-in-time join)
 
-```python
-# src/pipelines/batch/gold.py
-from pyspark import pipelines as dp
-from pyspark.sql import functions as F
+[`gold.py`](../../src/pipelines/batch/gold.py) khai báo MV `gold.fact_order_lines` trong
+pipeline batch, phân cụm theo `order_date, department_id`.
+[`build_fact_order_lines`](../../src/common/gold.py) đọc hai view hợp nhất
+`silver.orders` và `silver.order_items`, khớp header theo `order_id, source` rồi lấy ngành hàng
+và aisle từ `silver.dim_product`.
 
-CAT    = spark.conf.get("catalog")
-SILVER = f"{CAT}.{spark.conf.get('silver')}"
-GOLD   = f"{CAT}.{spark.conf.get('gold')}"
-LANDING_META = f"{CAT}.landing_meta"
+- Giá lấy từ `silver.product_prices_history` theo khoảng nửa mở
+  `__START_AT <= order_ts_sim < __END_AT`. `__END_AT IS NULL` là phiên bản còn hiệu lực.
+- Từ các ngày có header, gộp khuyến mãi SCD1 theo `product_id, order_date` và lấy mức giảm cao
+  nhất trong các khoảng bao gồm ngày đó. Mỗi dòng fact vì vậy nhận tối đa một mức giảm.
+- `revenue_sim` là doanh thu giả lập, tính bằng giá theo thời điểm nhân với phần trăm còn lại
+  sau khi giảm, làm tròn 2 chữ số. Khi không có khuyến mãi, `discount_pct` là NULL và doanh thu
+  lấy bằng giá. Lịch sử giá cố định theo SCD2, còn khuyến mãi dùng trạng thái SCD1 hiện có.
+- Giữ cả món thiếu dữ liệu tham chiếu để kiểm lỗi. Thiếu header hoặc danh mục làm flow lỗi.
+  Giá NULL được ghi vào metrics expectation `priced` và làm check G4 thất bại.
 
-
-@dp.materialized_view(name=f"{GOLD}.fact_order_lines", cluster_by=["order_date", "department_id"],
-                      comment="Mỗi món trong đơn + giá tại thời điểm đặt (SCD2) + KM đang chạy")
-@dp.expect("priced", "unit_price IS NOT NULL")
-def fact_order_lines():
-    return spark.sql(f"""
-      SELECT i.order_id, o.user_id, i.product_id, i.reordered, i.add_to_cart_order, o.source,
-             o.order_dow, o.order_hour_of_day, o.order_ts_sim, to_date(o.order_ts_sim) AS order_date,
-             d.department_id, d.aisle_id,
-             p.unit_price,
-             km.discount_pct,
-             round(p.unit_price * (1 - coalesce(km.discount_pct, 0) / 100.0), 2) AS revenue_sim
-      FROM {SILVER}.order_items i
-      JOIN {SILVER}.orders o            ON o.order_id = i.order_id
-      JOIN {SILVER}.dim_product d       ON d.product_id = i.product_id
-      LEFT JOIN {SILVER}.product_prices_history p
-             ON p.product_id = i.product_id
-            AND o.order_ts_sim >= p.__START_AT
-            AND (p.__END_AT IS NULL OR o.order_ts_sim < p.__END_AT)     -- đúng một phiên bản
-      LEFT JOIN (
-             SELECT product_id, start_date, end_date, max(discount_pct) AS discount_pct
-             FROM {SILVER}.promotions GROUP BY ALL) km
-             ON km.product_id = i.product_id
-            AND to_date(o.order_ts_sim) BETWEEN km.start_date AND km.end_date
-    """)
-```
-
-- **Point-in-time join:** điều kiện `__START_AT ≤ order_ts_sim < __END_AT` chọn **đúng một** phiên bản giá cho mỗi món. Đây là lý do cần SCD2.
-- Join bằng giá hiện hành sẽ làm doanh thu tháng trước thay đổi mỗi khi đổi giá.
-- Khi nhiều khuyến mãi cùng phủ một ngày của một sản phẩm, subquery `km` vẫn có thể ra nhiều dòng. Kiểm tra bằng `count(*) = count(DISTINCT order_id, product_id)` (mục 4). Nếu lệch thì gộp tiếp theo `(product_id, ngày)` trước khi join.
-- Doanh thu là **giả lập**: ghi rõ trên báo cáo và trên Power BI.
+**Bật sau khi Silver sẵn sàng.** Mặc định `enable_gold_fact=false` để các lượt bootstrap batch
+có thể chạy trước stream. Sau khi có hai view hợp nhất và giá Silver, chỉ dùng
+`BUNDLE_VAR_enable_gold_fact=true` để validate và deploy target dev, rồi refresh
+`instacart_batch` để tạo fact. Khi G4 sẵn sàng, mở PR đặt `enable_gold_fact: "true"`
+trong `targets.prod.variables` của `bundles/databricks.yml`. CI triển khai target prod
+sau khi PR cấu hình được merge.
 
 ### 2.2 Các bảng tổng hợp
 
-```python
-@dp.materialized_view(name=f"{GOLD}.kpi_daily")
-def kpi_daily():
-    return spark.sql(f"""
-      SELECT order_date, source,
-             count(DISTINCT order_id)               AS orders,
-             count(*)                               AS items,
-             count(DISTINCT user_id)                AS users,
-             round(sum(revenue_sim), 2)             AS revenue_sim,
-             round(avg(reordered), 4)               AS reorder_rate,
-             round(count(*) / count(DISTINCT order_id), 2) AS avg_basket_size
-      FROM {GOLD}.fact_order_lines GROUP BY order_date, source""")
+Các MV phục vụ Power BI nằm trong [`gold.py`](../../src/pipelines/batch/gold.py).
+`kpi_daily` nhóm theo ngày và nguồn, `kpi_by_dow_hour` dùng thứ và giờ gốc từ Instacart,
+`department_sales` nhóm theo ngày, ngành và aisle. Đối chiếu tổng `items` với fact trước khi
+dùng số liệu trên báo cáo.
 
+`product_360` giữ cả sản phẩm chưa từng được đặt, với `times_ordered = 0`. Expectation
+`one_row_per_product` dừng flow nếu khóa thiếu hoặc fanout. Nghiệm thu đủ 49.688 sản phẩm.
 
-@dp.materialized_view(name=f"{GOLD}.kpi_by_dow_hour")
-def kpi_by_dow_hour():
-    # Dùng cột gốc order_dow / order_hour_of_day, KHÔNG suy từ order_ts_sim (data_dictionary §4)
-    return spark.sql(f"""
-      SELECT order_dow, order_hour_of_day,
-             count(DISTINCT order_id) AS orders, count(*) AS items, round(avg(reordered), 4) AS reorder_rate
-      FROM {GOLD}.fact_order_lines GROUP BY ALL""")
+`product_pair_counts` lấy top 5.000 sản phẩm từ `product_360`, dùng mã sản phẩm để
+phá hòa. Với mỗi giỏ prior, lọc về danh mục top, khử trùng và sắp tăng dần trước khi tạo cặp,
+nên luôn có `p1 < p2`. Giữ cặp xuất hiện ít nhất 50 giỏ, sắp theo `pair_count` giảm dần,
+rồi `p1, p2` tăng dần và giới hạn 200.000 dòng.
 
+Support chia số giỏ có cặp cho toàn bộ số giỏ prior. Confidence/lift là **xấp xỉ**
+vì `product_360.times_ordered` dùng cả prior và stream, còn `pair_count` chỉ dùng prior.
+Số đo đánh giá thuật toán do DS tính trên đúng split.
 
-@dp.materialized_view(name=f"{GOLD}.department_sales", cluster_by=["department_id", "order_date"])
-def department_sales():
-    return spark.sql(f"""
-      SELECT order_date, department_id, aisle_id,
-             count(DISTINCT order_id) AS orders, count(*) AS items,
-             round(sum(revenue_sim), 2) AS revenue_sim,
-             sum(reordered) AS reordered_items,
-             sum(CASE WHEN discount_pct IS NOT NULL THEN 1 ELSE 0 END) AS promo_items
-      FROM {GOLD}.fact_order_lines GROUP BY ALL""")
-
-
-@dp.materialized_view(name=f"{GOLD}.product_360")
-@dp.expect_or_fail("one_row_per_product", "n = 1")
-def product_360():
-    return spark.sql(f"""
-      WITH s AS (SELECT product_id, count(*) AS times_ordered, round(avg(reordered), 4) AS reorder_rate,
-                        round(sum(revenue_sim), 2) AS revenue_sim
-                 FROM {GOLD}.fact_order_lines GROUP BY product_id)
-      SELECT d.product_id, d.product_name, d.aisle_id, d.aisle, d.department_id, d.department,
-             d.current_price, d.on_promotion, d.discount_pct,
-             d.brand, d.nutriscore_grade, d.nova_group, d.energy_kcal_100g, d.sugars_100g,
-             d.image_url, d.off_match_status, d.off_match_score,
-             coalesce(s.times_ordered, 0) AS times_ordered, s.reorder_rate, s.revenue_sim,
-             count(*) OVER (PARTITION BY d.product_id) AS n
-      FROM {SILVER}.dim_product d LEFT JOIN s USING (product_id)""")
-
-
-@dp.materialized_view(name=f"{GOLD}.product_pair_counts", cluster_by=["p1"])
-def product_pair_counts():
-    # Baseline DE cho trang 2. Luật kết hợp đầy đủ là gold.association_rules / recommendations của DS (ds/05 §4).
-    return spark.sql(f"""
-      WITH top AS (SELECT product_id FROM {GOLD}.product_360 ORDER BY times_ordered DESC LIMIT 5000),
-           b AS (SELECT e.order_id, array_sort(collect_list(e.product_id)) AS items      -- giữ món thuộc top
-                 FROM (SELECT order_id, explode(items) AS product_id
-                       FROM {SILVER}.baskets WHERE split = 'prior') e
-                 JOIN top USING (product_id)
-                 GROUP BY e.order_id),
-           n AS (SELECT count(*) AS n_baskets FROM {SILVER}.baskets WHERE split = 'prior'),
-           pairs AS (SELECT p.p1, p.p2 FROM b
-                     LATERAL VIEW explode(flatten(transform(items, (a, i) ->
-                        transform(slice(items, i + 2, size(items)), c -> named_struct('p1', a, 'p2', c))))) t AS p),
-           cnt AS (SELECT p1, p2, count(*) AS pair_count FROM pairs GROUP BY p1, p2 HAVING count(*) >= 50),
-           single AS (SELECT product_id, times_ordered FROM {GOLD}.product_360)
-      SELECT c.p1, c.p2, c.pair_count,
-             c.pair_count / n.n_baskets                               AS support,
-             c.pair_count / s1.times_ordered                          AS confidence_p1_to_p2,
-             (c.pair_count * n.n_baskets) / (s1.times_ordered * s2.times_ordered) AS lift
-      FROM cnt c CROSS JOIN n
-      JOIN single s1 ON s1.product_id = c.p1 JOIN single s2 ON s2.product_id = c.p2""")
-```
-
-- `items` được `array_sort` lại sau khi lọc, nên luôn có `p1 < p2`, không cần `least` / `greatest`.
-- `times_ordered` ở `product_360` đếm **mọi** đơn (prior + stream), còn `pair_count` chỉ đếm giỏ prior. Vì vậy `confidence` / `lift` ở đây là số **xấp xỉ** cho dashboard. Số chuẩn để đánh giá thuật toán do DS tính trên đúng split.
-- Lọc top 5.000 sản phẩm và `HAVING ≥ 50` giữ phép đếm cặp trong khả năng của 4 vCPU. Ghi thời gian chạy vào benchmark.
+MV cần cả `enable_gold_fact=true` và `enable_baskets=true`. Khi benchmark, dùng truy
+vấn event log ở §4.1 với flow `product_pair_counts` và ghi update ID, số cặp, thời gian flow.
 
 ### 2.3 Dim và bảng phân quyền
 
-```python
-@dp.materialized_view(name=f"{GOLD}.dim_date")
-def dim_date():
-    return spark.sql("""
-      SELECT d AS date, year(d) AS year, month(d) AS month, weekofyear(d) AS week,
-             date_format(d, 'yyyy-MM') AS year_month, dayofweek(d) AS iso_dow
-      FROM (SELECT explode(sequence(DATE'2015-01-01', DATE'2026-04-30', INTERVAL 1 DAY)) AS d)""")
+`dim_date` phủ từ 01/01/2015 đến 30/04/2026 với thứ ISO (thứ Hai = 1).
+`dim_department` lấy các ngành duy nhất từ Silver và kiểm xung đột theo `department_id`.
+`bi_user_access` chuẩn hóa và khử trùng cặp `user_email, department_id`; các giá trị thiếu
+email hoặc mã ngành hợp lệ bị loại qua expectation. Cả ba được bật cùng `enable_gold_fact`.
 
-
-@dp.materialized_view(name=f"{GOLD}.dim_department")
-def dim_department():
-    return spark.sql(f"SELECT DISTINCT department_id, department FROM {SILVER}.dim_product")
-
-
-@dp.materialized_view(name=f"{GOLD}.bi_user_access",
-                      comment="RLS: email người xem → department được xem. Nguồn nhập tay, không nằm trong git")
-@dp.expect_or_drop("valid_dept", "department_id IS NOT NULL")
-def bi_user_access():
-    return spark.read.table(f"{LANDING_META}.bi_access_seed")
-```
-
-**`bi_access_seed` không được commit lên git** (email là dữ liệu cá nhân). P3 nhập tay một lần trong SQL editor:
+Trước khi bật Gold, người phụ trách BI tạo và nhập bảng seed trong SQL Editor.
+Tài khoản chạy pipeline cần quyền đọc bảng này. Nhập các dòng thực ở workspace, ngoài repo.
 
 ```sql
 CREATE TABLE IF NOT EXISTS instacart.landing_meta.bi_access_seed (user_email STRING, department_id INT);
-INSERT INTO instacart.landing_meta.bi_access_seed VALUES
-  ('<email thành viên A>', 4),     -- produce
-  ('<email thành viên B>', 16);    -- dairy eggs
--- Vai Executive không cần dòng ở đây: role đó không lọc (07 §5)
 ```
+
+Trong môi trường nghiệm thu cách ly, đặt cấu hình pipeline `bi_access_seed_schema` trỏ đến
+schema riêng có bảng cùng cấu trúc.
 
 ## 3. Incremental hay tính lại toàn bộ
 
@@ -227,7 +134,47 @@ SELECT (SELECT sum(items) FROM instacart.gold.department_sales)
      = (SELECT count(*)   FROM instacart.gold.fact_order_lines) AS items_match;  -- true
 ```
 
-33.819.106 là tổng 32.434.489 + 1.384.617.
+33.819.106 là tổng 32.434.489 món prior và 1.384.617 món train từ stream.
+
+`src/tasks/reconcile_g4.sql` ghi bốn check `g4.fact.rows`, `g4.fact.no_fanout`,
+`g4.fact.keys` và `g4.fact.unpriced` vào `ops.reconciliation`, rồi báo lỗi nếu có check đỏ.
+Chạy file này sau `reconcile.sql` và `reconcile_g3.sql` đã đạt với cùng
+`run_id`, `check_date`, profile và schema. Đây là phần đối soát fact của AD-DE-22.
+Check tổng hợp `department_sales` ở trên dùng khi bảng tổng hợp đã có.
+
+### 4.1 Đo thời gian refresh fact
+
+Chọn update đã `COMPLETED`, giữ lại update ID và số dòng đối soát, rồi lấy mốc thời
+gian của flow `fact_order_lines` trong `ops.event_log_batch`. SQL sau nhận tham số
+STRING `catalog`, `ops_schema`, `update_id` từ môi trường đang đo.
+
+```sql
+WITH flow_events AS (
+  SELECT timestamp AS event_ts,
+    get_json_object(to_json(named_struct('v', origin)), '$.v.flow_name') AS flow_name,
+    get_json_object(to_json(named_struct('v', origin)), '$.v.update_id') AS update_id,
+    get_json_object(get_json_object(to_json(named_struct('v', details)), '$.v'), '$.flow_progress.status') AS flow_status
+  FROM IDENTIFIER(
+    '`' || replace(:catalog, '`', '``') || '`.`' || replace(:ops_schema, '`', '``') || '`.event_log_batch'
+  )
+  WHERE event_type = 'flow_progress'
+), fact_times AS (
+  SELECT min(CASE WHEN flow_status IN ('STARTING', 'RUNNING') THEN event_ts END) AS started_at,
+         max(CASE WHEN flow_status = 'COMPLETED' THEN event_ts END) AS completed_at
+  FROM flow_events
+  WHERE update_id = :update_id
+    AND (flow_name = 'fact_order_lines' OR endswith(replace(flow_name, '`', ''), '.fact_order_lines'))
+)
+SELECT started_at, completed_at,
+       timestampdiff(MILLISECOND, started_at, completed_at) / 1000.0 AS refresh_seconds
+FROM fact_times
+WHERE started_at IS NOT NULL AND completed_at >= started_at;
+```
+
+Ghi cả thời gian flow và thời gian update trong báo cáo benchmark, kèm profile dữ liệu và
+loại compute. Thời gian flow lấy từ event `STARTING` hoặc `RUNNING` đến `COMPLETED`,
+còn thời gian update gồm khởi tạo compute và các flow khác.
+[Pipeline event log](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
 
 ## 5. Tối ưu lưu trữ và đọc/ghi (rubric 3.1, 3.4)
 

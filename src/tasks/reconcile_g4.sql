@@ -107,6 +107,10 @@ USING (
       FULL OUTER JOIN item_keys i
         ON f.order_id <=> i.order_id AND f.product_id <=> i.product_id) AS actual
       FROM e
+    UNION ALL
+    SELECT 'g4.fact.unpriced' AS check_name, CAST(0 AS BIGINT) AS expected,
+      (SELECT count(*) FROM fact WHERE unit_price IS NULL) AS actual
+      FROM e
   )
   SELECT CAST(:check_date AS DATE) AS check_date, check_name, expected, actual, (expected = actual) AS passed, current_timestamp() AS checked_at, :run_id AS run_id, :profile AS profile, 'G4' AS stage, (SELECT sha2(to_json(named_struct('catalog', :catalog, 'ops', :ops_schema, 'bronze', :bronze_schema, 'silver', :silver_schema, 'gold', :gold_schema, 'counts', array_sort(collect_list(named_struct('metric', metric, 'expected', expected, 'source', source))))), 256)
       FROM expected_counts
@@ -117,7 +121,7 @@ ON t.check_date = s.check_date
   AND t.check_name = s.check_name
 WHEN MATCHED THEN UPDATE SET *
 WHEN NOT MATCHED THEN INSERT *;
-SELECT assert_true(count(*) = 50
+SELECT assert_true(count(*) = 51
   AND count_if(NOT passed OR run_id <> :run_id OR profile <> :profile OR config_hash <> (SELECT sha2(to_json(named_struct('catalog', :catalog, 'ops', :ops_schema, 'bronze', :bronze_schema, 'silver', :silver_schema, 'gold', :gold_schema, 'counts', array_sort(collect_list(named_struct('metric', metric, 'expected', expected, 'source', source))))), 256)
       FROM expected_counts
       WHERE profile = :profile)) = 0,
@@ -173,4 +177,5 @@ FROM reconciliation
   'g3.baskets.items',
   'g4.fact.rows',
   'g4.fact.no_fanout',
-  'g4.fact.keys');
+  'g4.fact.keys',
+  'g4.fact.unpriced');
