@@ -55,10 +55,11 @@ và aisle từ `silver.dim_product`.
   Giá NULL được ghi vào metrics expectation `priced` và làm check G4 thất bại.
 
 **Bật sau khi Silver sẵn sàng.** Mặc định `enable_gold_fact=false` để các lượt bootstrap batch
-có thể chạy trước stream. Sau khi có hai view hợp nhất và giá Silver, dùng
-`BUNDLE_VAR_enable_gold_fact=true` khi validate và deploy dev, rồi refresh
-`instacart_batch` để tạo fact. Giữ `enable_gold_fact=true` trong cấu hình deploy của môi
-trường đã đưa fact vào vận hành.
+có thể chạy trước stream. Sau khi có hai view hợp nhất và giá Silver, chỉ dùng
+`BUNDLE_VAR_enable_gold_fact=true` để validate và deploy target dev, rồi refresh
+`instacart_batch` để tạo fact. Khi G4 sẵn sàng, mở PR đặt `enable_gold_fact: "true"`
+trong `targets.prod.variables` của `bundles/databricks.yml`. CI triển khai target prod
+sau khi PR cấu hình được merge.
 
 ### 2.2 Các bảng tổng hợp
 

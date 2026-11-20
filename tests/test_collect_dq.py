@@ -172,3 +172,46 @@ def test_update_without_metrics_does_not_fabricate_zero_rows(spark, log):
 def test_unknown_log_parameter_is_rejected(spark, log):
     with pytest.raises(Exception, match="collect_dq requires"):
         collect(spark, log, source="unknown")
+
+
+def test_resolves_only_the_update_for_the_exact_pipeline_task_attempt(spark, log):
+    sql = (ROOT / "src/tasks/resolve_pipeline_update.sql").read_text()
+
+    def started(eid, update, task_run_id, pipeline="pipe-batch", event_type="create_update"):
+        row = event(eid, pipeline=pipeline, update=update, event_type=event_type)
+        details = {"create_update": {"update_cause_details": {"job_details": {"run_id": task_run_id}}}}
+        return (*row[:3], json.dumps(details), *row[4:])
+
+    rows = [
+        started("old", "update-old", 901),
+        started("repair", "update-repair", 902),
+        started("duplicate", "update-repair", 902),
+        started("other-pipeline", "wrong-pipeline", 902, pipeline="pipe-other"),
+        started("other-event", "wrong-event", 902, event_type="user_action"),
+        started("ambiguous-a", "update-a", 903),
+        started("ambiguous-b", "update-b", 903),
+    ]
+    spark.createDataFrame(rows, EVENT_SCHEMA).write.format("delta").mode("append").saveAsTable(
+        f"`{log}`.event_log_batch"
+    )
+
+    def resolve(task_run_id):
+        return (
+            spark.sql(
+                sql,
+                args={
+                    "catalog": "spark_catalog",
+                    "ops_schema": log,
+                    "pipeline_id": "pipe-batch",
+                    "pipeline_task_run_id": str(task_run_id),
+                },
+            )
+            .first()
+            .update_id
+        )
+
+    assert resolve(901) == "update-old"
+    assert resolve(902) == "update-repair"
+    for task_run_id in (903, 904):
+        with pytest.raises(Exception, match="expected one pipeline update"):
+            resolve(task_run_id)
