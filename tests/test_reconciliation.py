@@ -197,18 +197,20 @@ def test_g3_g4_stages_require_fresh_prerequisites_and_do_not_add_daily_rows(reco
     recon.script("reconcile.sql")
     recon.script("reconcile_g3.sql")
     assert len(checks(recon)) == 47 and all(r.passed for r in checks(recon).values())
-    recon.put("gold", "fact_order_lines", recon.table("silver", "order_items"))
+    fact = recon.table("silver", "order_items").withColumn("unit_price", F.lit("2.50").cast("decimal(10,2)"))
+    recon.put("gold", "fact_order_lines", fact)
     recon.script("reconcile_g4.sql")
     recon.script("reconcile_g4.sql")
-    assert len(checks(recon)) == 50
-    recon.table("silver", "order_items").limit(1).write.mode("append").saveAsTable(
-        f"`{recon.schemas['gold']}`.fact_order_lines"
-    )
+    assert len(checks(recon)) == 51
+    assert checks(recon)["g4.fact.unpriced"].passed
+    bad_line = fact.limit(1).withColumn("unit_price", F.lit(None).cast("decimal(10,2)"))
+    bad_line.write.mode("append").saveAsTable(f"`{recon.schemas['gold']}`.fact_order_lines")
     with pytest.raises(Exception, match="reconciliation failed"):
         recon.script("reconcile_g4.sql")
     result = checks(recon)
     assert not result["g4.fact.no_fanout"].passed
     assert not result["g4.fact.keys"].passed and result["g4.fact.keys"].actual == 1
+    assert not result["g4.fact.unpriced"].passed and result["g4.fact.unpriced"].actual == 1
     recon.params["run_id"] = "run-b"
     with pytest.raises(Exception, match="prerequisite checks are stale"):
         recon.script("reconcile_g3.sql")
