@@ -18,6 +18,11 @@ resources:
             op: GREATER_THAN
             value: 3600
       email_notifications: ${var.batch_email_notifications}
+      environments:
+        - environment_key: bi_ops
+          spec:
+            environment_version: "4"
+            dependencies: ["requests==2.34.2"]
       tasks:
         - task_key: pipeline_batch
           pipeline_task:
@@ -85,3 +90,56 @@ resources:
               profile: instacart_2017
               run_id: "{{job.run_id}}"
               check_date: "{{job.start_time.iso_date}}"
+
+        - task_key: refresh_bi
+          depends_on:
+            - task_key: reconcile
+          run_if: ALL_SUCCESS
+          max_retries: 0
+          environment_key: bi_ops
+          spark_python_task:
+            python_file: ../../src/tasks/refresh_bi.py
+            source: WORKSPACE
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --ops-schema
+              - ${var.schema_prefix}ops
+              - --run-id
+              - "{{job.run_id}}"
+              - --adf-run-id
+              - "{{job.parameters.adf_run_id}}"
+              - --start-ms
+              - "{{job.start_time.timestamp_ms}}"
+              - --check-date
+              - "{{job.start_time.iso_date}}"
+              - --enabled
+              - ${var.enable_power_bi_refresh}
+
+        - task_key: record_failed_batch
+          depends_on:
+            - task_key: pipeline_batch
+            - task_key: resolve_pipeline_update
+            - task_key: collect_dq
+            - task_key: init_reconciliation
+            - task_key: reconcile
+          run_if: AT_LEAST_ONE_FAILED
+          environment_key: bi_ops
+          spark_python_task:
+            python_file: ../../src/tasks/refresh_bi.py
+            source: WORKSPACE
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --ops-schema
+              - ${var.schema_prefix}ops
+              - --run-id
+              - "{{job.run_id}}"
+              - --adf-run-id
+              - "{{job.parameters.adf_run_id}}"
+              - --start-ms
+              - "{{job.start_time.timestamp_ms}}"
+              - --check-date
+              - "{{job.start_time.iso_date}}"
+              - --mode
+              - audit_failed
