@@ -525,3 +525,34 @@ Lượt thử sai kỳ vọng lưu được check đỏ. G3/G4 còn chờ đủ 
 Cách cấu hình, thời gian và statement ID:
 [DE/06 §4](../de/06_van_hanh_chay_lai.md#4-đối-soát-tự-động-opsreconciliation),
 [06c_nghiem_thu_reconciliation.md](../de/06c_nghiem_thu_reconciliation.md).
+
+## 10. Nhật ký vận hành `ops.pipeline_runs` (AD-DE-25)
+
+Bảng Delta ghi một dòng cho mỗi lượt batch. Khóa logic `run_id STRING` là Databricks job run ID.
+`adf_run_id STRING` nhận RunId do ADF truyền vào, mặc định `manual` khi chạy tay.
+`started_at TIMESTAMP` là giờ bắt đầu job và `recorded_at TIMESTAMP` là giờ ghi audit gần nhất.
+
+| Cột | Ý nghĩa |
+| --- | --- |
+| `status STRING` | Trạng thái do task audit ghi. `running` trong lúc gửi, `succeeded` khi batch đạt và Power BI nhận yêu cầu hoặc refresh được bỏ qua theo cấu hình, `failed` khi upstream lỗi hoặc yêu cầu refresh lỗi hay chưa rõ kết quả. |
+| `refresh_status STRING` | `skipped` khi bỏ qua, `submitting` khi đã ghi ý định gửi, `requested` khi API trả 202, `failed` khi gọi lỗi xác định, `submission_unknown` khi chưa rõ Power BI đã nhận yêu cầu. `requested` xác nhận tiếp nhận. Kết quả làm mới xem trong Power BI Refresh history. |
+| `refresh_request_id STRING` | Mã yêu cầu từ header `x-ms-request-id` nếu Power BI trả về. |
+| `checks_total`, `checks_passed` BIGINT | Số check đã lưu và số check đạt trong `ops.reconciliation` của cùng job run ID và ngày bắt đầu theo UTC. |
+| `rows_processed BIGINT`, `rows_metric STRING` | Lấy `actual` của `g4.fact.rows` nếu có, nếu chưa chạy G4 thì lấy `actual` của `silver.prior.rows`. `rows_metric` ghi tên check đã dùng. Cả hai là NULL khi chưa có check nào trong hai check này. |
+
+| `refresh_reason` | Khi ghi |
+| --- | --- |
+| `upstream_failed` | Một task upstream thất bại. |
+| `reconciliation_not_green` | Task đọc lại và thấy thiếu check hoặc có check đỏ cho run hiện tại. |
+| `refresh_disabled` | Cờ `enable_power_bi_refresh` đang tắt. |
+| `gold_reconciliation_missing` | Đã bật cờ nhưng chưa có check fact G4 cho run hiện tại. |
+| `power_bi_permission_denied` | Power BI trả HTTP 403. |
+| `submission_started`, `power_bi_accepted` | Đã ghi ý định trước POST hoặc đã nhận HTTP 202. |
+| `power_bi_credentials_unavailable`, `power_bi_token_failed` | Thiếu thông tin xác thực hợp lệ hoặc lấy token thất bại. |
+| `request_transport_error`, `power_bi_http_<code>` | Lỗi truyền tải khi POST hoặc mã HTTP khác. Lỗi truyền tải, 3xx và 5xx được ghi là `submission_unknown`. |
+
+`refresh_bi` ghi sau khi `reconcile` xanh. `record_failed_batch` ghi audit khi upstream lỗi.
+Repair dùng MERGE theo cùng `run_id` để cập nhật dòng cũ khi cần. Nếu lần gửi trước đã được tiếp
+nhận hoặc chưa rõ kết quả, task giữ trạng thái đó để tránh gửi trùng.
+
+[Xem cấu hình và cách kiểm tra refresh](../de/07_power_bi.md#7-làm-mới-dữ-liệu-sau-mỗi-lần-pipeline-chạy).
