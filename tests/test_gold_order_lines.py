@@ -109,7 +109,9 @@ def test_gold_pipeline_is_opt_in_and_registers_expected_clustering(spark, monkey
         expectations.append((name, condition))
         return lambda function: function
 
-    dp = SimpleNamespace(materialized_view=materialized_view, expect=expect, expect_or_fail=expect)
+    dp = SimpleNamespace(
+        materialized_view=materialized_view, expect=expect, expect_or_fail=expect, expect_or_drop=expect
+    )
     monkeypatch.setitem(sys.modules, "pyspark.pipelines", dp)
     config = {"catalog": "test_catalog", "silver": "p2_silver", "gold": "p2_gold", "enable_gold_fact": enabled}
     previous = {key: spark.conf.get(key, None) for key in config}
@@ -128,9 +130,20 @@ def test_gold_pipeline_is_opt_in_and_registers_expected_clustering(spark, monkey
                 spark.conf.set(key, value)
 
     if enabled:
-        (definition,) = definitions
+        assert {row["name"].rsplit(".", 1)[-1].strip("`") for row in definitions} == {
+            "fact_order_lines",
+            "kpi_daily",
+            "kpi_by_dow_hour",
+            "department_sales",
+            "product_360",
+            "dim_date",
+            "dim_department",
+            "bi_user_access",
+        }
+        definition = definitions[0]
         assert definition["name"] == "`test_catalog`.`p2_gold`.`fact_order_lines`"
         assert definition["cluster_by"] == ["order_date", "department_id"]
         assert ("priced", "unit_price IS NOT NULL") in expectations
+        assert ("one_row_per_product", "product_id IS NOT NULL AND n = 1") in expectations
     else:
         assert definitions == expectations == []
