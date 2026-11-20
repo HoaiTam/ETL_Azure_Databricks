@@ -63,56 +63,15 @@ sau khi PR cấu hình được merge.
 
 ### 2.2 Các bảng tổng hợp
 
+Các MV phục vụ Power BI nằm trong [`gold.py`](../../src/pipelines/batch/gold.py).
+`kpi_daily` nhóm theo ngày và nguồn, `kpi_by_dow_hour` dùng thứ và giờ gốc từ Instacart,
+`department_sales` nhóm theo ngày, ngành và aisle. Đối chiếu tổng `items` với fact trước khi
+dùng số liệu trên báo cáo.
+
+`product_360` giữ cả sản phẩm chưa từng được đặt, với `times_ordered = 0`. Expectation
+`one_row_per_product` dừng flow nếu khóa thiếu hoặc fanout. Nghiệm thu đủ 49.688 sản phẩm.
+
 ```python
-@dp.materialized_view(name=f"{GOLD}.kpi_daily")
-def kpi_daily():
-    return spark.sql(f"""
-      SELECT order_date, source,
-             count(DISTINCT order_id)               AS orders,
-             count(*)                               AS items,
-             count(DISTINCT user_id)                AS users,
-             round(sum(revenue_sim), 2)             AS revenue_sim,
-             round(avg(reordered), 4)               AS reorder_rate,
-             round(count(*) / count(DISTINCT order_id), 2) AS avg_basket_size
-      FROM {GOLD}.fact_order_lines GROUP BY order_date, source""")
-
-
-@dp.materialized_view(name=f"{GOLD}.kpi_by_dow_hour")
-def kpi_by_dow_hour():
-    # Dùng cột gốc order_dow / order_hour_of_day, KHÔNG suy từ order_ts_sim (data_dictionary §4)
-    return spark.sql(f"""
-      SELECT order_dow, order_hour_of_day,
-             count(DISTINCT order_id) AS orders, count(*) AS items, round(avg(reordered), 4) AS reorder_rate
-      FROM {GOLD}.fact_order_lines GROUP BY ALL""")
-
-
-@dp.materialized_view(name=f"{GOLD}.department_sales", cluster_by=["department_id", "order_date"])
-def department_sales():
-    return spark.sql(f"""
-      SELECT order_date, department_id, aisle_id,
-             count(DISTINCT order_id) AS orders, count(*) AS items,
-             round(sum(revenue_sim), 2) AS revenue_sim,
-             sum(reordered) AS reordered_items,
-             sum(CASE WHEN discount_pct IS NOT NULL THEN 1 ELSE 0 END) AS promo_items
-      FROM {GOLD}.fact_order_lines GROUP BY ALL""")
-
-
-@dp.materialized_view(name=f"{GOLD}.product_360")
-@dp.expect_or_fail("one_row_per_product", "n = 1")
-def product_360():
-    return spark.sql(f"""
-      WITH s AS (SELECT product_id, count(*) AS times_ordered, round(avg(reordered), 4) AS reorder_rate,
-                        round(sum(revenue_sim), 2) AS revenue_sim
-                 FROM {GOLD}.fact_order_lines GROUP BY product_id)
-      SELECT d.product_id, d.product_name, d.aisle_id, d.aisle, d.department_id, d.department,
-             d.current_price, d.on_promotion, d.discount_pct,
-             d.brand, d.nutriscore_grade, d.nova_group, d.energy_kcal_100g, d.sugars_100g,
-             d.image_url, d.off_match_status, d.off_match_score,
-             coalesce(s.times_ordered, 0) AS times_ordered, s.reorder_rate, s.revenue_sim,
-             count(*) OVER (PARTITION BY d.product_id) AS n
-      FROM {SILVER}.dim_product d LEFT JOIN s USING (product_id)""")
-
-
 @dp.materialized_view(name=f"{GOLD}.product_pair_counts", cluster_by=["p1"])
 def product_pair_counts():
     # Baseline DE cho trang 2. Luật kết hợp đầy đủ là gold.association_rules / recommendations của DS (ds/05 §4).
@@ -143,36 +102,20 @@ def product_pair_counts():
 
 ### 2.3 Dim và bảng phân quyền
 
-```python
-@dp.materialized_view(name=f"{GOLD}.dim_date")
-def dim_date():
-    return spark.sql("""
-      SELECT d AS date, year(d) AS year, month(d) AS month, weekofyear(d) AS week,
-             date_format(d, 'yyyy-MM') AS year_month, dayofweek(d) AS iso_dow
-      FROM (SELECT explode(sequence(DATE'2015-01-01', DATE'2026-04-30', INTERVAL 1 DAY)) AS d)""")
+`dim_date` phủ từ 01/01/2015 đến 30/04/2026 với thứ ISO (thứ Hai = 1).
+`dim_department` lấy các ngành duy nhất từ Silver và kiểm xung đột theo `department_id`.
+`bi_user_access` chuẩn hóa và khử trùng cặp `user_email, department_id`; các giá trị thiếu
+email hoặc mã ngành hợp lệ bị loại qua expectation. Cả ba được bật cùng `enable_gold_fact`.
 
-
-@dp.materialized_view(name=f"{GOLD}.dim_department")
-def dim_department():
-    return spark.sql(f"SELECT DISTINCT department_id, department FROM {SILVER}.dim_product")
-
-
-@dp.materialized_view(name=f"{GOLD}.bi_user_access",
-                      comment="RLS: email người xem → department được xem. Nguồn nhập tay, không nằm trong git")
-@dp.expect_or_drop("valid_dept", "department_id IS NOT NULL")
-def bi_user_access():
-    return spark.read.table(f"{LANDING_META}.bi_access_seed")
-```
-
-**`bi_access_seed` không được commit lên git** (email là dữ liệu cá nhân). P3 nhập tay một lần trong SQL editor:
+Trước khi bật Gold, người phụ trách BI tạo và nhập bảng seed trong SQL Editor.
+Tài khoản chạy pipeline cần quyền đọc bảng này. Nhập các dòng thực ở workspace, ngoài repo.
 
 ```sql
 CREATE TABLE IF NOT EXISTS instacart.landing_meta.bi_access_seed (user_email STRING, department_id INT);
-INSERT INTO instacart.landing_meta.bi_access_seed VALUES
-  ('<email thành viên A>', 4),     -- produce
-  ('<email thành viên B>', 16);    -- dairy eggs
--- Vai Executive không cần dòng ở đây: role đó không lọc (07 §5)
 ```
+
+Trong môi trường nghiệm thu cách ly, đặt cấu hình pipeline `bi_access_seed_schema` trỏ đến
+schema riêng có bảng cùng cấu trúc.
 
 ## 3. Incremental hay tính lại toàn bộ
 
