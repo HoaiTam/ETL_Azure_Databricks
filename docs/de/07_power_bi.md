@@ -185,7 +185,24 @@ Có ba lớp, chi tiết vì sao ở [devops/06 §5.3](../devops/06_de_den_dashb
 | **Scheduled refresh** (mặc định) | *Semantic model → Settings → Data source credentials* (OAuth2, tài khoản P3) → *Refresh* hằng ngày 04:00 | Luôn bật. `pl_master` chạy 02:00, xong trước 03:30 |
 | Refresh qua API sau job | Task `refresh_bi` gọi `POST https://api.powerbi.com/v1.0/myorg/groups/{workspaceId}/datasets/{datasetId}/refreshes` | Chỉ khi tenant cho phép service principal gọi API (spike 3.6) |
 
-Nếu tenant chặn service principal thì `refresh_bi.py` chỉ ghi dòng "skipped" vào `ops.pipeline_runs`, còn scheduled refresh lo phần làm mới. Task `reconcile` đứng trước `refresh_bi` nên số sai không bao giờ được đẩy chủ động. Scheduled refresh thì vẫn chạy theo giờ, nên phải theo dõi `ops.reconciliation` ở trang 5.
+Task `refresh_bi` chạy sau `reconcile` thành công và ghi một dòng Delta vào
+`ops.pipeline_runs` theo Databricks job run ID, kèm `adf_run_id`, số check, số dòng và trạng thái refresh.
+Lượt đối soát đỏ chạy nhánh audit `record_failed_batch` với lý do `upstream_failed`.
+
+`enable_power_bi_refresh=false` là mặc định. Job ghi `skipped / refresh_disabled`, để lịch
+Power BI đảm nhiệm việc làm mới. Chỉ bật qua cấu hình deploy sau khi job có đối soát G4 và
+tenant cho phép service principal truy cập semantic model. Nếu chưa có check fact G4 đúng
+run ID, task ghi `skipped / gold_reconciliation_missing`. Nếu Power BI trả HTTP 403, task ghi
+`skipped / power_bi_permission_denied`.
+
+Khi bật API, P1 cấu hình Key Vault scope `kv` với các key `power-bi-tenant-id`,
+`power-bi-client-id`, `power-bi-client-secret`, `power-bi-workspace-id` và
+`power-bi-dataset-id`. Job lấy token Entra rồi gửi POST vào REST API. HTTP 202 ghi
+`requested` kèm request ID, biểu thị yêu cầu đã được nhận. Xem Refresh history để biết
+kết quả import. Repair cập nhật cùng một hàng; nếu trạng thái gửi chưa xác định, kiểm
+tra Refresh history trước khi thử lại.
+
+[Power BI REST API](https://learn.microsoft.com/en-us/rest/api/power-bi/datasets/refresh-dataset-in-group).
 
 ## 8. Mobile layout, publish và chia sẻ
 
