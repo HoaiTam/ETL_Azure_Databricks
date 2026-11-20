@@ -165,3 +165,41 @@ Tham chiếu chính thức:
 [consistency verification](https://learn.microsoft.com/en-us/azure/data-factory/copy-activity-data-consistency),
 [provider pipeline](https://github.com/hashicorp/terraform-provider-azurerm/blob/v4.0.0/internal/services/datafactory/data_factory_pipeline_resource.go),
 [Zenodo record](https://zenodo.org/records/2654444).
+
+## Điều phối batch (AD-DE-19)
+
+| Pipeline | Tham số String | Cách gán khi triển khai |
+|---|---|---|
+| `pl_ingest_off` | `off_job_id`, `off_source` | AD-OPS-26 lookup job prod `instacart-off-crawler` và đặt ID dạng chuỗi làm default. `off_source` mặc định `bronze`. |
+| `pl_master` | `batch_job_id`, `off_source`, `failure_webhook_vault` | Lookup job prod `instacart-batch-medallion` và đặt ID dạng chuỗi làm default. Vault mặc định rỗng. |
+
+P1 nạp mảng activities và settings tương ứng với `concurrency: 1`. Stack AD-OPS-25b đã
+chừa hai pipeline này cho AD-OPS-26. Publish `pl_ingest_off` trước `pl_master`, sau khi có
+`ls_dbx`, `pl_ingest_retail_db` và hai job prod. Managed identity của ADF phải có quyền
+chạy cả hai job. Các ID để trống trong JSON repo và được điền lúc triển khai.
+
+Để bật thông báo lỗi, P1 đặt tên Key Vault dự án vào `failure_webhook_vault` và lưu URL HTTPS
+của relay Teams/email trong secret `adf-batch-failure-webhook`. Managed identity của ADF cần
+quyền đọc secret. Relay nhận POST JSON với `pipeline`, `adf_run_id` và `text` rồi trả JSON.
+URL lấy lúc chạy và được che trong Monitor. Nếu để trống tên vault, ADF bỏ qua phần gửi và
+vẫn báo run thất bại. Không đặt webhook hoặc token trong Git hay tham số trigger.
+
+### Nghiệm thu sau khi P1 publish
+
+1. Giữ trigger tắt. Khi seed, stream và crawler khác đã dừng, chạy `pl_master` bằng
+   **Trigger now**. Nếu chưa có bảng bronze nguồn cho crawler, truyền `off_source=landing`
+   sau khi Instacart đã công bố đủ CSV. Giữ `enable_off=false` cho đến khi lượt crawl prod
+   đầu tiên được kiểm và cấu hình được đổi qua PR riêng.
+2. Trong ADF Monitor ghi RunId và xác nhận CDC, OFF, batch đều `Succeeded`. Mở
+   `runPageUrl` của activity `run_batch_medallion`, lấy ID job run và đối chiếu tham số
+   `adf_run_id` với RunId của `pl_master`.
+3. Trong bản Debug chưa publish, đánh dấu riêng activity `ingest_retail_db` là
+   **Inactive → Failed** để diễn tập. Kiểm OFF và batch đều `Skipped`, `pl_master`
+   báo `Failed` và không tạo job run mới. Dùng cấu hình thông báo thử nếu cần đo đường Web.
+4. Ghi hai RunId ADF, ID job run thành công và kết quả diễn tập vào #55. Sau khi lượt chạy
+   tay đạt, P1 mở PR bật lịch 02:00 ở AD-OPS-26.
+
+Tham chiếu [Databricks Job activity](https://learn.microsoft.com/en-us/azure/data-factory/transform-data-databricks-job),
+[nhánh lỗi ADF](https://learn.microsoft.com/en-us/azure/data-factory/tutorial-pipeline-failure-error-handling),
+[truy xuất secret trong Web activity](https://learn.microsoft.com/en-us/azure/data-factory/how-to-use-azure-key-vault-secrets-pipeline-activities)
+và [giả lập activity thất bại](https://learn.microsoft.com/en-us/azure/data-factory/deactivate-activity).

@@ -281,16 +281,19 @@ IP gọi API; không đổi cấu hình hay xóa journal trong lúc phục hồi
 
 ## 5. ADF `pl_master` và nhật ký chạy
 
-```
-pl_master (trigger 02:00, tham số wave_seed: bool = false)
-  ├─ Execute pl_ingest_retail_db
-  ├─ Execute pl_ingest_off            (gọi job off_crawler → off_images)
-  ├─ Databricks Job  instacart-batch-medallion   (job_parameters: adf_run_id = @pipeline().RunId)
-  └─ On failure  → Web activity gửi Teams/email (tùy chọn)
-```
+`pl_master` chờ `pl_ingest_retail_db` thành công rồi mới gọi và chờ `pl_ingest_off`.
+Pipeline OFF dùng linked service `ls_dbx` để chạy `instacart-off-crawler` gồm cả crawler và ảnh.
+Sau khi OFF hoàn tất, `pl_master` gọi `instacart-batch-medallion` qua cùng linked service và
+truyền `adf_run_id = @pipeline().RunId`. Đối chiếu tham số này với RunId trong ADF Monitor
+bằng link `runPageUrl` ở output của activity batch. Ghi vào `ops.pipeline_runs` thuộc AD-DE-25.
 
-- Các activity nối với nhau bằng điều kiện **Succeeded**, nên Databricks chỉ chạy khi landing đã công bố xong.
-- Job Databricks ghi `adf_run_id` vào `ops.pipeline_runs`, nối được hai hệ thống khi truy vết.
+Nếu CDC hoặc OFF lỗi, activity batch bị bỏ qua. Khi batch lỗi hoặc bị bỏ qua, nhánh lỗi có thể
+gửi Web activity với RunId rồi giữ trạng thái `Failed` của pipeline, kể cả khi thông báo bị tắt
+hoặc gửi lỗi. Tùy chọn `off_source=landing` dùng cho lượt đầu khi chưa có bronze. Lượt hằng ngày
+dùng mặc định `bronze`.
+
+Hai pipeline được bàn giao qua [hợp đồng ADF](../../adf/README.md#điều-phối-batch-ad-de-19).
+P1 publish qua AD-OPS-26 với trigger tắt. Lịch 02:00 chỉ được bật sau lượt chạy tay đạt.
 
 ## 6. Lỗi giữa chừng thì chạy lại thế nào
 

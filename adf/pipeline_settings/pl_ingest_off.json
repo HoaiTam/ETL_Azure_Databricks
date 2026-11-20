@@ -1,0 +1,7 @@
+{
+  "concurrency": 1,
+  "parameters": {
+    "off_job_id": "",
+    "off_source": "bronze"
+  }
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "name": "run_off_crawler",
+    "description": "Chạy job instacart-off-crawler gồm thu thập dữ liệu và ảnh OFF.",
+    "type": "DatabricksJob",
+    "linkedServiceName": {
+      "referenceName": "ls_dbx",
+      "type": "LinkedServiceReference"
+    },
+    "policy": {
+      "timeout": "0.05:00:00",
+      "retry": 0
+    },
+    "typeProperties": {
+      "jobId": {
+        "type": "Expression",
+        "value": "@pipeline().parameters.off_job_id"
+      },
+      "jobParameters": {
+        "source": {
+          "type": "Expression",
+          "value": "@pipeline().parameters.off_source"
+        }
+      }
+    }
+  }
+]
