@@ -76,6 +76,15 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_A }}
       - uses: databricks/setup-cli@main
+      - name: Configure batch notifications
+        working-directory: bundles
+        env:
+          BATCH_EMAIL_NOTIFICATIONS: ${{ secrets.DATABRICKS_BATCH_EMAIL_NOTIFICATIONS }}
+        run: |
+          if [[ -n "$BATCH_EMAIL_NOTIFICATIONS" ]]; then
+            mkdir -p .databricks/bundle/prod
+            jq -e '{batch_email_notifications: .}' <<< "$BATCH_EMAIL_NOTIFICATIONS" > .databricks/bundle/prod/variable-overrides.json
+          fi
       - run: databricks bundle deploy -t prod
         working-directory: bundles
         env:

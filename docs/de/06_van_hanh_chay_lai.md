@@ -25,66 +25,30 @@ Ba câu hỏi theo thứ tự:
 
 ## 2. Job điều phối batch
 
-ADF `pl_master` gọi job này sau khi landing đã công bố xong ([01 §5](01_ingest_landing.md)).
+ADF `pl_master` gọi job `instacart-batch-medallion` theo ID sau khi landing công bố xong
+([01 §5](01_ingest_landing.md)). Bundle định nghĩa job trong
+[`jobs_batch.yml`](../../bundles/resources/jobs_batch.yml). ADF truyền `adf_run_id`; khi chạy tay
+giá trị mặc định là `manual`. Job chạy một lượt tại một thời điểm và xếp hàng lượt tiếp theo.
 
-```yaml
-# bundles/resources/job_batch.yml
-resources:
-  jobs:
-    batch_medallion:
-      name: instacart-batch-medallion
-      parameters:
-        - { name: adf_run_id, default: manual }
-      tasks:
-        - task_key: pipeline_batch
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.instacart_batch.id}
-            full_refresh: false
+| Task | Điều kiện và đầu ra |
+|---|---|
+| `pipeline_batch` | Chạy update tăng dần của `instacart_batch` trên policy single-node. |
+| `resolve_pipeline_update` | Tra `create_update` trong event log theo pipeline ID và task run ID. Trả đúng một `update_id`; báo lỗi khi thiếu hoặc trùng update. |
+| `collect_dq` | Nhận `update_id` đã xác định và MERGE counters. Có thể thu metrics của update lỗi nếu event log đã có. |
+| `init_reconciliation` | Chỉ chạy khi cả pipeline và collector thành công. Tạo bảng và seed số kỳ vọng còn thiếu. |
+| `reconcile` | Chạy 22 check batch sau init. Dùng `job.run_id` và ngày UTC lúc job bắt đầu để repair trong cùng lượt giữ khóa ổn định. |
 
-        - task_key: create_views                 # gộp batch ∪ stream (03 §7), idempotent
-          depends_on: [{ task_key: pipeline_batch }]
-          sql_task:
-            file: { path: ../../src/tasks/create_views.sql }
-            warehouse_id: ${var.warehouse_id}
+Task SQL dùng serverless warehouse `wh-instacart-bi` đã có. Tại G3 hiện tại, bundle giữ
+`enable_baskets=false`. Hai view, kiểm G3/G4 và `refresh_bi` được nối vào khi có đủ nguồn và task
+phụ thuộc. Chạy batch tách thời gian với crawler, seed và stream để vừa quota 4 vCPU.
 
-        - task_key: collect_dq
-          depends_on: [{ task_key: pipeline_batch }]
-          sql_task:
-            file: { path: ../../src/tasks/collect_dq.sql }
-            warehouse_id: ${var.warehouse_id}
+Khi repair task pipeline, dùng task run ID mới và chạy lại các task phụ thuộc. Khi chỉ repair
+`reconcile`, làm lại với cùng job run ID và ngày kiểm tra. Mục 4 mô tả khóa MERGE và cách đọc hàng lỗi.
 
-        - task_key: reconcile
-          depends_on: [{ task_key: create_views }]
-          sql_task:
-            file: { path: ../../src/tasks/reconcile.sql }
-            warehouse_id: ${var.warehouse_id}
-
-        - task_key: refresh_bi
-          depends_on: [{ task_key: reconcile }]
-          run_if: ALL_SUCCESS                   # đối soát không đạt thì không đẩy số lên dashboard
-          job_cluster_key: sn
-          spark_python_task:
-            python_file: ../../src/tasks/refresh_bi.py
-            parameters: ["--adf-run-id", "{{job.parameters.adf_run_id}}"]
-      job_clusters:
-        - job_cluster_key: sn
-          new_cluster:                          # khai đủ trường fixed của policy, không dùng apply_policy_default_values (devops/05 §3 bước 6)
-            policy_id: ${var.policy_id}
-            spark_version: 15.4.x-scala2.12
-            node_type_id: ${var.node_type_id}
-            num_workers: 0
-            data_security_mode: SINGLE_USER
-            spark_conf:
-              spark.databricks.cluster.profile: singleNode
-              spark.master: "local[*]"
-            custom_tags: { ResourceClass: SingleNode, cost_owner: p2 }
-```
-
-**Vì sao các task sau pipeline là `sql_task` trên serverless warehouse:**
-- Warehouse serverless **không tính vào quota vCPU**.
-- Khi cluster của pipeline chưa tắt hẳn (trễ 60 giây), job vẫn chạy tiếp được mà không vượt 4 vCPU.
-
-`refresh_bi` cần Python để gọi REST nên dùng job cluster. Nó chạy sau cùng, lúc đó cluster pipeline đã tắt.
+Cảnh báo lỗi và vượt 60 phút nhận danh sách email từ biến bundle `batch_email_notifications`.
+Ở dev, đặt giá trị trong `bundles/.databricks/bundle/dev/variable-overrides.json`. Giá trị của biến là
+một object có hai mảng `on_failure` và `on_duration_warning_threshold_exceeded`. CI prod lấy object
+từ secret `DATABRICKS_BATCH_EMAIL_NOTIFICATIONS` trong environment `prod`.
 
 **Job của DS không nằm trong batch job.** Bản đầu của hình kiến trúc 2 vẽ `train_rules → evaluate_register` sau `build_gold`; kế hoạch (và hình hiện tại) tách thành job riêng, chạy tay:
 - `ds-prepare` (DE sở hữu, [08 §6](08_du_lieu_cho_ds.md)).
@@ -120,8 +84,9 @@ Chạy toàn bộ file cùng phiên SQL trên warehouse serverless, dùng đúng
 
 Không UNION tới bảng stream chưa có. Khi stream đã publish log, chạy lại **cùng file** với
 `event_log_table=event_log_stream` và update_id của stream. Hai nguồn ghi chung bảng đích.
-AD-DE-18 sẽ truyền tham số/update ID và điều phối SQL task; cần thu cả update lỗi (run_if phù hợp),
-không suy đoán update mới nhất khi một run khác đang chạy. Collector không tạo pipeline hay cấp quyền.
+Job AD-DE-18 truyền update ID từ task tra event log theo đúng pipeline task run.
+Collector có thể thu cả update lỗi nếu pipeline đã ghi event. Task đối soát chỉ bắt đầu khi pipeline
+và collector đều thành công.
 
 | Cột | Hợp đồng |
 |---|---|
@@ -333,7 +298,7 @@ Mỗi kịch bản cần ghi đủ 4 thứ: **ảnh lỗi**, **lệnh chạy l�
 | Xem gì | Ở đâu | Ngưỡng cảnh báo |
 |---|---|---|
 | `pl_master` thành công | ADF Monitor; email khi lỗi (Web activity) | Bất kỳ lỗi nào |
-| Job batch | Job runs; notification email cho P2 trong `job_batch.yml` | Lỗi, hoặc chạy > 60 phút |
+| Job batch | Job runs; notification email trong `jobs_batch.yml` | Lỗi, hoặc chạy > 60 phút |
 | Chất lượng | Trang 5 Power BI (`ops.dq_results`) | `failed / (passed + failed)` > 1% ở một luật |
 | Đối soát | `ops.reconciliation` | Có dòng `passed = false` |
 | Chi phí | Cost Management theo tag `owner` (resource Azure) và `cost_owner` (cluster, warehouse) | Budget 50% |
