@@ -52,6 +52,21 @@ variables:
   enable_gold_fact:
     description: Bật fact Gold khi view orders và order_items đã có và Silver đủ dữ liệu
     default: "false"
+  stream_continuous:
+    description: Chạy pipeline stream liên tục khi demo, mặc định chạy từng đợt
+    default: "false"
+  stream_schedule_pause_status:
+    description: Bật lịch prod khi Event Hubs đã sẵn sàng và pipeline chạy từng đợt
+    default: PAUSED
+  eh_generation:
+    description: Mã thế hệ của Event Hubs, giữ nguyên khi chạy lại và đổi khi hub được tạo lại
+    default: g1
+  eh_region:
+    description: Region Azure của Event Hubs trên Sub B
+    default: koreacentral
+  dbx_region:
+    description: Region Azure của workspace Databricks để gắn nhãn độ trễ
+    default: eastasia
   node_type_id:
     description: Máy của job cluster, phải trùng giá trị fixed trong policy (docs/devops/05 §3 bước 6)
     default: Standard_D4ds_v4
@@ -76,6 +91,14 @@ targets:
           configuration:
             pipelines.numUpdateRetryAttempts: "0"
             pipelines.maxFlowRetryAttempts: "0"
+        instacart_stream:
+          configuration:
+            pipelines.numUpdateRetryAttempts: "0"
+            pipelines.maxFlowRetryAttempts: "0"
+      jobs:
+        stream_schedule:
+          schedule:
+            pause_status: PAUSED
 
   prod:
     mode: production
