@@ -466,8 +466,8 @@ và `n_items INT = size(items)` đếm số sản phẩm khác nhau. Header test
 Header holdout đang chờ món được cảnh báo riêng. Snapshot AD-DE-20 kiểm miền số trước khi cast về INT.
 
 Mục tiêu full release sau khi phát đủ stream là **3.214.874 giỏ prior** và **131.209 giỏ holdout**.
-Còn chờ AD-ST-05 (#68) để chạy hai view trên warehouse và đối soát số giỏ thật theo
-[runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md).
+AD-ST-05 đã hoàn tất. Kết quả dev và phần còn chờ lượt phát đủ qua Event Hubs của AD-ST-07
+được ghi trong [runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md#kết-quả-nghiệm-thu-dev).
 
 ## 7. Dữ liệu cho Data Science
 
@@ -501,8 +501,9 @@ RUNNING, loại event ID trùng; không dựng zero khi thiếu metrics. Một b
 view có thể được tính trong nhiều flow; SUM failed không phải số dòng quarantine. Khi fail dừng update,
 xem ERROR/violation thay vì suy ra số đếm không được emit. `at` là max event timestamp, không phải lúc thu.
 
-Đã nghiệm thu batch trên warehouse dev với **47 khóa expectation**. Hai lượt MERGE
-giữ nguyên kết quả và đã đối chiếu bốn bảng quarantine. Còn chờ event log stream.
+Đã nghiệm thu trên warehouse dev với **47 khóa expectation batch** và **12 khóa stream**.
+Hai lượt MERGE giữ nguyên kết quả của mỗi nguồn. Phần stream phát đủ 6 luật trên mỗi flow
+và khớp từng lý do lỗi với 4 bản tin quarantine trong lô mẫu.
 Hợp đồng, truy vấn điều tra và nghiệm thu:
 [DE/06 §3](../de/06_van_hanh_chay_lai.md#3-event-log-và-opsdq_results),
 [hướng dẫn collect_dq](../de/06b_nghiem_thu_dq.md).
