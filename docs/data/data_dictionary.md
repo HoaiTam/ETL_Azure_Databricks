@@ -466,8 +466,8 @@ và `n_items INT = size(items)` đếm số sản phẩm khác nhau. Header test
 Header holdout đang chờ món được cảnh báo riêng. Snapshot AD-DE-20 kiểm miền số trước khi cast về INT.
 
 Mục tiêu full release sau khi phát đủ stream là **3.214.874 giỏ prior** và **131.209 giỏ holdout**.
-Còn chờ AD-ST-05 (#68) để chạy hai view trên warehouse và đối soát số giỏ thật theo
-[runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md).
+AD-ST-05 đã hoàn tất. Kết quả dev và phần còn chờ lượt phát đủ qua Event Hubs của AD-ST-07
+được ghi trong [runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md#kết-quả-nghiệm-thu-dev).
 
 ## 7. Dữ liệu cho Data Science
 
