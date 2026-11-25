@@ -114,5 +114,38 @@ Bundle giữ `enable_off`, `off_root` và `enable_baskets`. Lượt chạy với
 kết thúc `COMPLETED`. Schema silver chưa có `baskets` trước và sau lượt chạy.
 [Update dev](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/89561b5f-9702-40ec-8720-4d4a0fa6d5a7).
 
-Issue #51 tiếp tục theo dõi AD-ST-05 (#68). Còn chờ bật baskets, chạy `create_views.sql` hai lần
-trên warehouse dev, đối soát đủ dòng full release và kiểm replay Delta/Event Hubs.
+## Kết quả nghiệm thu dev
+
+Nghiệm thu ngày 25/11/2026 từ commit `f1d600b` sau khi AD-ST-05 đã merge. Pipeline dev cách ly
+dùng nguyên helper cùng định nghĩa MV của batch trong schema `23521394_ad15_silver` của catalog `instacart`.
+Nguồn prior/test lấy từ Silver batch dev. Nguồn train đầy đủ lấy món từ Bronze và header từ
+`order_time_sim`, ánh xạ sang schema Silver stream vì lượt phát đủ của AD-ST-07 còn mở.
+[Bằng chứng replay 1.000 đơn của AD-ST-05](evidence/ad-st-05/2026-11-22-silver-replay.md) ·
+[AD-ST-07](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/70).
+
+Chạy nguyên `create_views.sql` hai lần trên `wh-instacart-bi`. Mỗi lượt bọc trong
+`BEGIN … END` để `USE IDENTIFIER` và cả hai câu tạo view chạy trong cùng phiên.
+Hai statement `01f1e898-6728-12f1-a3b3-1c8d2e593458` và
+`01f1e898-6a79-1ba8-82d8-6700648b9229` đều báo `SUCCEEDED`.
+
+| View | Nhóm nguồn | Số dòng | Khóa phân biệt |
+|---|---|---:|---:|
+| `orders` | Batch prior | 3.214.874 | 3.214.874 |
+| `orders` | Batch test | 75.000 | 75.000 |
+| `orders` | Train qua schema stream | 131.209 | 131.209 |
+| `order_items` | Batch prior | 32.434.489 | 32.434.489 |
+| `order_items` | Train qua schema stream | 1.384.617 | 1.384.617 |
+
+| Split của `baskets` | Số giỏ | Khóa phân biệt | Tổng `n_items` | Giỏ sai hợp đồng |
+|---|---:|---:|---:|---:|
+| prior | 3.214.874 | 3.214.874 | 32.434.489 | 0 |
+| holdout | 131.209 | 131.209 | 1.384.617 | 0 |
+
+Update Lakeflow hoàn tất với các expectations đang bật. Truy vấn đối soát xác nhận 0 giỏ test,
+0 khóa đơn giao nhau giữa batch và stream, 0 món mồ côi và 0 khóa giỏ trùng.
+[Update tạo baskets](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/c01b131c-6cf8-48dc-8d17-ffe4d6e9bc4f/updates/d3bd82c8-1d85-4ad3-a398-cd67b7a1651f).
+
+Refresh thường lần hai trên cùng nguồn cho kết quả `EXCEPT ALL` bằng 0 theo cả hai chiều
+trên năm cột nghiệp vụ, so với bản chụp 3.346.083 giỏ của lượt đầu. Statement đối chiếu
+`01f1e89a-1890-1f8e-80a0-d401ce8159d6` báo `SUCCEEDED`.
+[Update lần hai](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/c01b131c-6cf8-48dc-8d17-ffe4d6e9bc4f/updates/efb1fbe4-f727-47aa-a9a2-0225523b766e).
