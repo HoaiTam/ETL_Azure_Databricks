@@ -8,8 +8,8 @@ Hợp đồng và các truy vấn điều tra nằm ở [DE/06 §3](06_van_hanh_
 
 Cần nghiệm thu #44 (pipeline/event log), #48 (silver/DQ), #24 (warehouse) và #22 (quyền UC).
 Chưa có CLI/profile được chọn thì tiếp tục kiểm local, không tự dùng profile đầu tiên.
-Stream chỉ thu sau AD-ST-03 publish `event_log_stream`; không tạo bảng log giả ở schema thật.
-AD-DE-18 sẽ tích hợp task/parameters và lấy update ID từ đúng lần chạy, kể cả update lỗi.
+Stream thu từ `event_log_stream` do Lakeflow công bố. Nghiệm thu dev có thể dùng nguồn Bronze
+cách ly để chủ động kiểm số dòng lỗi. AD-DE-18 đã tích hợp collector cho batch sau bước xác định update ID.
 
 ## Chạy trên warehouse dev
 
@@ -84,7 +84,7 @@ qua `tests/fixtures/ivysettings.xml` và cache Ivy, nên lần đầu cần mạ
 Tests chạy nguyên file SQL, CREATE/MERGE Delta thật, JSON/STRUCT, late metrics và rollback dữ liệu lỗi.
 Nguồn metrics là dữ liệu tự dựng, không phải event log của engine LDP.
 
-## Kết quả trên dev
+## Kết quả batch trên dev
 
 Ngày 2026-11-19, chạy `instacart_batch` với Bronze/Silver thực của AD-DE-11 và AD-DE-12.
 Lượt dev thường hoàn tất với checkpoint cũ và chỉ phát 2 event có expectation. Lượt có số đo dùng schema dev cách ly để đọc toàn bộ nguồn mà không reset bảng đang dùng.
@@ -114,11 +114,50 @@ Bốn bảng quarantine đều rỗng và expectation tương ứng đều ghi 0
 | `order_time_sim` | `order_headers_canonical` | 10 |
 | `orders_batch` | `orders_batch` | 1 |
 
-Còn chờ `event_log_stream` để nghiệm thu stream và tích hợp job điều phối.
-
 ### Nâng bảng dev đã tạo từ bản thử trước review
 
 Bảng mới tự tạo có `pipeline_name`. Nếu bảng dev cũ còn tám cột, kiểm `DESCRIBE TABLE` rồi
 chạy một lần `ALTER TABLE <catalog>.<ops_schema>.dq_results ADD COLUMNS (pipeline_name STRING)`.
 MERGE sau đó cập nhật tên ngoài khóa, giữ nguyên các tổng đã thu. Trang BI dùng
 `coalesce(pipeline_name, pipeline)` để hiển thị các event thiếu tên.
+
+## Kết quả stream trên dev
+
+Ngày 25/11/2026, chạy nguyên `silver_events.py` từ `f1d600b` trên pipeline Lakeflow
+single-node dev cách ly. Nguồn là bảng Delta `order_events` với năm bản tin mẫu theo
+[test Silver stream](../../tests/test_stream_parse.py). Cách này kiểm Bronze → Silver,
+event log do Lakeflow phát và collector. Phần Kafka/Event Hubs được kiểm riêng ở
+[AD-ST-05](evidence/ad-st-05/2026-11-22-silver-replay.md).
+
+[Update stream](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/b8d64716-1715-40d9-a03f-2faa8717b127/updates/c56655b6-b2ee-4f14-a08a-4f5b0e441deb)
+trả `COMPLETED`. Bronze có 5 bản tin. Silver có 1 đơn, 1 món và 4 dòng
+`quarantine_order_events`. Payload quarantine trùng bản tin Bronze theo offset.
+
+| Offset | Bản tin | `_dq_failed` |
+|---:|---|---|
+| 1 | JSON hỏng | `parsed`, `known_type`, `schema_v1`, `has_items`, `id_matches` |
+| 2 | Schema version 2 | `schema_v1` |
+| 3 | Món thiếu mã sản phẩm | `valid_item_keys` |
+| 4 | Mã sản phẩm trùng trong đơn | `valid_item_keys` |
+
+Hai event `flow_progress` có metrics từ `event_log_stream`, mỗi flow
+`stream_orders_scd1` và `stream_order_items_scd1` phát đủ 6 luật trên dataset `events_valid`.
+Đối chiếu độc lập từ event log theo khóa đầy đủ xác nhận cả 12 dòng đích khớp counters,
+timestamp và tên pipeline. Bảng dưới áp dụng riêng cho từng flow.
+
+| Expectation | `passed` | `failed` | Số dòng quarantine có luật |
+|---|---:|---:|---:|
+| `parsed` | 4 | 1 | 1 |
+| `known_type` | 4 | 1 | 1 |
+| `schema_v1` | 3 | 2 | 2 |
+| `has_items` | 4 | 1 | 1 |
+| `valid_item_keys` | 3 | 2 | 2 |
+| `id_matches` | 4 | 1 | 1 |
+
+Chạy nguyên `collect_dq.sql` hai lần trên `wh-instacart-bi` với
+`catalog=instacart`, `ops_schema=23521394_ad16_review`, `event_log_table=event_log_stream`
+và update ID `c56655b6-b2ee-4f14-a08a-4f5b0e441deb`. Các statement
+`01f1e89c-12f9-1ac0-a5fa-279c5af62714` và `01f1e89c-1f95-13af-8a22-72f6949c2119`
+đều `SUCCEEDED`. Lần đầu thêm **12 dòng**. Lần hai thêm 0, sửa 0, xóa 0 theo
+`DESCRIBE HISTORY` và giữ nguyên payload. Tổng **44 lượt đạt, 16 lượt lỗi** là tổng theo hai flow
+và sáu luật, trong khi quarantine lưu **4 bản tin lỗi**.
