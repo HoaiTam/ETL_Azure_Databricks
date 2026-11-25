@@ -466,8 +466,8 @@ và `n_items INT = size(items)` đếm số sản phẩm khác nhau. Header test
 Header holdout đang chờ món được cảnh báo riêng. Snapshot AD-DE-20 kiểm miền số trước khi cast về INT.
 
 Mục tiêu full release sau khi phát đủ stream là **3.214.874 giỏ prior** và **131.209 giỏ holdout**.
-Còn chờ AD-ST-05 (#68) để chạy hai view trên warehouse và đối soát số giỏ thật theo
-[runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md).
+AD-ST-05 đã hoàn tất. Kết quả dev và phần còn chờ lượt phát đủ qua Event Hubs của AD-ST-07
+được ghi trong [runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md#kết-quả-nghiệm-thu-dev).
 
 ## 7. Dữ liệu cho Data Science
 
@@ -501,8 +501,9 @@ RUNNING, loại event ID trùng; không dựng zero khi thiếu metrics. Một b
 view có thể được tính trong nhiều flow; SUM failed không phải số dòng quarantine. Khi fail dừng update,
 xem ERROR/violation thay vì suy ra số đếm không được emit. `at` là max event timestamp, không phải lúc thu.
 
-Đã nghiệm thu batch trên warehouse dev với **47 khóa expectation**. Hai lượt MERGE
-giữ nguyên kết quả và đã đối chiếu bốn bảng quarantine. Còn chờ event log stream.
+Đã nghiệm thu trên warehouse dev với **47 khóa expectation batch** và **12 khóa stream**.
+Hai lượt MERGE giữ nguyên kết quả của mỗi nguồn. Phần stream phát đủ 6 luật trên mỗi flow
+và khớp từng lý do lỗi với 4 bản tin quarantine trong lô mẫu.
 Hợp đồng, truy vấn điều tra và nghiệm thu:
 [DE/06 §3](../de/06_van_hanh_chay_lai.md#3-event-log-và-opsdq_results),
 [hướng dẫn collect_dq](../de/06b_nghiem_thu_dq.md).
@@ -556,3 +557,31 @@ Repair dùng MERGE theo cùng `run_id` để cập nhật dòng cũ khi cần. N
 nhận hoặc chưa rõ kết quả, task giữ trạng thái đó để tránh gửi trùng.
 
 [Xem cấu hình và cách kiểm tra refresh](../de/07_power_bi.md#7-làm-mới-dữ-liệu-sau-mỗi-lần-pipeline-chạy).
+
+## 11. Kết quả đo định dạng `ops.benchmark_results` (AD-DE-26)
+
+Bảng Delta lưu một dòng cho mỗi tổ hợp **`(run_id, repetition, format)`**. Một lượt job
+thành công ghi đủ 12 dòng (4 định dạng × 3 vòng). Repair cùng `run_id` cập nhật các dòng
+cùng khóa bằng MERGE.
+
+| Cột | Kiểu | Ý nghĩa |
+| --- | --- | --- |
+| `run_id` | STRING | ID lượt chạy job Databricks (`job.run_id`). |
+| `repetition` | INT | Số thứ tự vòng đo, từ 1 đến 3. |
+| `format` | STRING | `csv`, `parquet`, `delta` hoặc `delta_optimized` (Delta có `OPTIMIZE ZORDER BY product_id`). |
+| `n_rows` | BIGINT | Số dòng đọc được khi quét toàn bộ dữ liệu. |
+| `filter_rows` | BIGINT | Số dòng đọc được sau khi lọc theo `filter_product_id`. |
+| `filter_product_id` | BIGINT | Mã sản phẩm dùng trong phép lọc. |
+| `write_s` | DOUBLE | Thời gian ghi dữ liệu theo định dạng, tính bằng giây. |
+| `optimize_s` | DOUBLE | Thời gian chạy OPTIMIZE và ZORDER, tính bằng giây. Các định dạng còn lại ghi 0. |
+| `scan_s` | DOUBLE | Thời gian quét toàn bộ dữ liệu để đếm dòng và tính checksum, tính bằng giây. |
+| `filter_s` | DOUBLE | Thời gian lọc theo mã sản phẩm, đếm dòng và tính checksum, tính bằng giây. |
+| `size_mb` | DOUBLE | Dung lượng file dữ liệu đang dùng, tính bằng MiB (1 MiB = 2²⁰ byte). Bỏ qua metadata và file Delta đã bị thay thế. |
+| `source_table` | STRING | Tên đầy đủ của bảng Silver làm nguồn. |
+| `node_type_id` | STRING | Mã loại máy của job cluster. |
+| `runtime` | STRING | Phiên bản Databricks Runtime của job cluster. |
+| `input_partitions` | INT | Số phân vùng Spark cấu hình khi ghi bản Parquet đầu vào chung. |
+| `measured_at` | TIMESTAMP | Thời điểm ghi kết quả của lượt job. |
+
+[Cách chạy và truy vấn trung vị](../de/05_gold_serving.md#51-job-benchmark-định-dạng-ad-de-26) ·
+[Kết quả nghiệm thu dev](../tasks/02_de_batch.md#kết-quả-ad-de-26).
