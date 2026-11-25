@@ -35,8 +35,9 @@ CI deploy dev bằng SP CI nên `<user>` khi đó là short name của SP, khác
 ## Trước khi chạy dev
 
 1. AD-OPS-19 (#21), AD-OPS-20 (#22), AD-OPS-21 (#23) phải được nghiệm thu: có catalog,
-   managed storage, volume raw và hai policy `instacart-single-node` / `instacart-pipeline-single-node`
-   để lookup của bundle resolve được. Khi cần đối soát tay, dùng warehouse `wh-instacart-bi` của AD-OPS-22 (#24).
+   managed storage, volume raw, hai policy `instacart-single-node` / `instacart-pipeline-single-node`
+   và warehouse `wh-instacart-bi` (AD-OPS-22 #24) để các lookup của bundle resolve được.
+   Job batch không dùng warehouse; biến `warehouse_id` phục vụ các `sql_task` của job DS.
 2. Có Databricks CLI hiện hành và đăng nhập bằng **profile người chạy đã chọn**. Không tự lấy
    profile đầu tiên. Cài/đăng nhập theo `databricks-core` hoặc `/databricks:setup` nếu còn thiếu.
 3. Danh tính deploy/run có `USE CATALOG`, `CREATE SCHEMA` trên catalog; trên các schema dev

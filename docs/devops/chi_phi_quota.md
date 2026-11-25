@@ -157,7 +157,8 @@ Nguyên tắc: làm mục 1–3 khi chạm mốc 50% (email budget 50 USD). Hi�
 Áp dụng từ 2026-11-20. Lý do: warehouse `wh-instacart-bi` chiếm khoảng 2/3 chi phí tuần đầu (§3), và phần lớn là truy vấn tay rải rác trong ngày.
 
 Mọi thành viên đều là admin workspace, nên bỏ `CAN_USE` không chặn được truy vấn. Giữ warehouse
-để phục vụ đối soát và BI. Việc giới hạn thời gian chạy phụ thuộc vào cách nhóm sử dụng.
+để phục vụ đối soát, BI và các `sql_task` của job DS; bundle tra warehouse theo tên (`bundles/databricks.yml`,
+biến `warehouse_id`) nên không xóa được tới cuối kỳ. Việc giới hạn thời gian chạy phụ thuộc vào cách nhóm sử dụng.
 
 ### 6.1 Cái gì bật warehouse
 
@@ -169,6 +170,7 @@ Mọi thành viên đều là admin workspace, nên bỏ `CAN_USE` không chặn
 | Pipeline `instacart_batch` chạy riêng | Không | Tốn cluster pipeline, không tốn warehouse |
 | ADF `pl_master` | Chưa | Trigger đang tắt (`triggers_on = false`) |
 | Job `instacart-batch-medallion`, cả bản `[dev …]` | Không | `resolve_pipeline_update`, `collect_dq`, `init_reconciliation`, `reconcile` chạy trên Spark serverless |
+| Job `instacart-ds-benchmark` | **Có** | Ba `sql_task`: `ddl_ml`, `ingest_local`, `publish_gold` |
 | SQL editor, tab *Sample data* của Catalog Explorer, notebook gắn warehouse, dashboard, Power BI | **Có** | Mỗi truy vấn giữ warehouse sống thêm 2 phút |
 
 ### 6.2 Quy tắc
