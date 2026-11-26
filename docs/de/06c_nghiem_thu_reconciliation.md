@@ -97,7 +97,7 @@ Ghi issue #53: commit, params/manifest hash, nguồn và pipeline/update ID, sta
 count/distinct thật, lần chạy lại, thử sai expectation và repair. Không dùng dữ liệu fixture làm bằng chứng
 3.421.083 orders / 49.688 products / 131.209 stream hoặc đạt G3 thật.
 
-## Trạng thái hiện tại
+## Nghiệm thu Batch ngày 19/11/2026
 
 Ngày 2026-11-19, chạy trên warehouse dev với profile `instacart_2017` và schema ops cách ly. Nguồn là snapshot Bronze/Silver sau [update batch](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/4df2ff96-be27-4af6-8e87-e2e876da866e/updates/7d05cb18-cfe9-46e8-9159-812a5ebffe6c).
 
@@ -109,7 +109,7 @@ Ngày 2026-11-19, chạy trên warehouse dev với profile `instacart_2017` và 
 | Sau khi khôi phục | `01f1e40a-d7ff-1cec-b9fe-f4f074b4ed4e` | 42,82 giây | MERGE khôi phục 22 check xanh sau khi trả kỳ vọng về 49.688 |
 
 Thời gian là từ khi gửi từng statement đến khi nhận trạng thái cuối. Hai lần chạy dùng cùng ngày và run ID.
-Cổng G3/G4 chính thức còn chờ bộ dữ liệu đã nghiệm thu của AD-DE-15 và nguồn Gold tương ứng. G4 dùng FULL OUTER JOIN
+Lượt đo ngày 19/11 chỉ chạy Batch. G4 dùng FULL OUTER JOIN
 trên số dòng của từng cặp khóa để kiểm cả khóa bị thiếu lẫn số lần xuất hiện bị lệch.
 
 ## Diễn tập G3 trên toàn bộ release 2017
@@ -130,8 +130,41 @@ run ID `ad17-ad22-dev-20261126` và ngày kiểm `2026-11-26`. Kết quả ghi v
 | G3 | 25/25 | 25 | `01f1e978-e7b9-1c78-8590-415f6cc11b59` |
 
 Các check xác nhận 3.421.083 đơn, 49.688 sản phẩm, 131.209 đơn train,
-1.384.617 món train và 0 phiên bản giá mở bị trùng. G3 chính thức còn chờ
-Silver stream của P3 sau AD-ST-07. Khi có quyền đọc, gắn hai bảng vào schema
-nghiệm thu, cập nhật view và refresh `baskets`, rồi chạy lại Batch → G3 với
-cùng bộ tham số cho cả hai stage. Ghi update ID của batch và stream dưới
-[issue #53](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/53).
+1.384.617 món train và 0 phiên bản giá mở bị trùng trong lượt diễn tập.
+Kết quả với Silver stream thật nằm ở lượt nghiệm thu dưới đây.
+
+## Nghiệm thu sau replay AD-ST-07
+
+Ngày `2026-11-26`, chạy Batch → G3 → G4 hai lượt trên warehouse dev với SQL ở
+`fdeecae`. Cả ba stage dùng cùng run ID `ad17-replay-20261126-730929c6`, ngày kiểm và profile
+`instacart_2017`.
+
+| Tham số schema | Giá trị trong catalog `instacart` |
+|---|---|
+| `bronze_schema` | `23521394_bronze` |
+| `silver_schema` | `23521394_ad17_replay_silver` |
+| `gold_schema` | `23521394_ad215_gold` |
+| `ops_schema` | `23521394_ad17_replay_ops` |
+
+Các view trong schema Silver nghiệm thu đọc Silver batch dev, lịch sử giá đã phục hồi và
+`stream_orders`, `stream_order_items`, `orders`, `order_items`, `baskets` từ
+`23521394_ad15_silver`. Statement `01f1e988-47e9-1d0b-8651-fbb837630ce4` xác nhận 131.209 đơn mang mã
+`ad-st-07-6b780de-02`, 1.384.617 món stream và 3.346.083 giỏ.
+[Xác nhận nguồn AD-DE-15](03f_nghiem_thu_baskets.md#kết-quả-đối-soát-sau-replay).
+
+| Stage | Check đạt mỗi lượt | Statement lượt 1 | Statement lượt 2 |
+|---|---:|---|---|
+| Batch | 22/22 | `01f1e988-87cc-16be-9abd-7abb5c255b00` | `01f1e988-bab5-119a-8203-0201b47f9dd5` |
+| G3 | 25/25 | `01f1e988-a257-1e7f-bfee-cefa4430060c` | `01f1e988-d42c-1bde-b4cc-391117c1b4e7` |
+| G4 | 4/4 | `01f1e988-b0c2-1878-a639-a73e3fc64cf7` | `01f1e988-e104-15a7-bf86-e6e15236ad32` |
+
+Hai lượt trong cùng ngày đều có 51 dòng kết quả và 51 khóa `(check_date, check_name)`
+phân biệt, cùng một `config_hash`. Lượt hai cập nhật kết quả theo khóa.
+Statement chốt số khóa `01f1e988-eb44-1eef-ab62-608c2d13130d` xác nhận đủ 51 check đạt.
+Các chỉ số G3 gồm 3.421.083 đơn, 49.688 sản phẩm, 131.209 đơn stream, 1.384.617 món
+stream và 0 sản phẩm trùng phiên bản giá mở.
+
+Để kiểm cổng lỗi, tăng riêng kỳ vọng `products` trong schema ops dev từ 49.688 lên
+49.689. Batch báo `FAILED` ở assert cuối (`01f1e988-63a7-1428-abed-760e99e5af11`) và bảng lưu
+`bronze.products` với `passed=false`, thực tế 49.688 (`01f1e988-82fb-13c2-aebe-48f08794cc2d`).
+Đã trả kỳ vọng về 49.688 (`01f1e988-84e1-1b62-869f-4a66d63a24fc`) trước hai lượt Batch → G3 → G4 đạt ở trên.
