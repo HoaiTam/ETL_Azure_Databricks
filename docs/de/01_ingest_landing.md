@@ -261,6 +261,15 @@ landing để `product_prices_scd2` có thể tạo khoảng hiệu lực cũ.
    Full release cần `products = 49688` và `missing_or_duplicate_baselines = 0`, chạy với UTC.
    Chạy thêm một update thường trên cùng dữ liệu để kiểm số khóa và số phiên bản không tăng.
 
+Ngày 26/11/2026, đối soát chỉ đọc trên prod sau khi P1 công bố file
+`recovery=152afb450e9fb2db876bd3b0da0d9723d2508c2cbbce5dfa2d7e421aee40e1a5`.
+Statement `01f1e978-ccd8-1c72-a67f-b4e8cb179091` xác nhận Bronze chưa nạp dòng nào từ file
+này. Silver có 49.688 sản phẩm, còn 2.484 sản phẩm thiếu giá gốc và 0 sản phẩm trùng giá gốc.
+Tài khoản P2 đọc được các bảng này nhưng thiếu quyền Run trên pipeline batch prod.
+Sau khi người có quyền chạy bước 4, lưu update ID và số dòng thực tế ở
+[issue #215](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/215).
+Chỉ kiểm `g4.fact.unpriced` prod khi Gold đã chạy với Silver stream đầy đủ.
+
 Nghiệm thu dev cách ly ngày 23/11/2026 dùng các file CDC thật và tập train từ Bronze với timestamp mô phỏng.
 Lượt đối chứng tái hiện 2.484 sản phẩm thiếu giá gốc. Sau khi thêm đúng một file, Bronze nạp 2.484 dòng,
 Silver có đủ 49.688 giá gốc và Gold có **0 dòng thiếu giá trên 33.819.106 dòng**.
