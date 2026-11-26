@@ -141,7 +141,18 @@ def save_run(spark, table: str, record: dict) -> None:
             CAST(:rows_processed AS BIGINT) AS rows_processed, CAST(:rows_metric AS STRING) AS rows_metric
         ) AS source
         ON target.run_id = source.run_id
-        WHEN MATCHED THEN UPDATE SET *
+        WHEN MATCHED THEN UPDATE SET
+          adf_run_id = coalesce(nullif(source.adf_run_id, 'manual'), target.adf_run_id),
+          started_at = source.started_at,
+          recorded_at = source.recorded_at,
+          status = source.status,
+          refresh_status = source.refresh_status,
+          refresh_reason = source.refresh_reason,
+          refresh_request_id = source.refresh_request_id,
+          checks_total = source.checks_total,
+          checks_passed = source.checks_passed,
+          rows_processed = source.rows_processed,
+          rows_metric = source.rows_metric
         WHEN NOT MATCHED THEN INSERT *
         """,
         args={"runs_table": table, **record},

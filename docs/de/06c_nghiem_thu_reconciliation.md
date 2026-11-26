@@ -9,7 +9,7 @@ SQL trong `src/tasks/` được tách để giai đoạn sớm không tham chi�
 | `init_reconciliation.sql` | Tạo bảng Delta thường expected_counts/reconciliation, seed số tham chiếu full nếu chưa có |
 | `reconcile.sql` | 22 check batch: sáu bronze CSV, split, clock, header/món silver, khóa, payload và orphan |
 | `reconcile_g3.sql` | 25 check G3: dim_product, SCD2 mở, stream, view hợp nhất, baskets |
-| `reconcile_g4.sql` | 3 check gold fact: số dòng, không fanout và cặp khóa khớp silver |
+| `reconcile_g4.sql` | 4 check gold fact: số dòng, không fanout, cặp khóa khớp silver và giá thiếu |
 
 Mỗi file chạy nguyên trong cùng phiên SQL, dừng khi bất kỳ assert/statement lỗi.
 G3 kiểm 22 check batch đã xanh cùng run/cấu hình trước khi đọc nguồn G3; G4 yêu cầu cả 47 check trước.
@@ -75,7 +75,7 @@ cần chạy lại từ batch. Một ops namespace chỉ đại diện một dat
 schema riêng, không chạy đồng thời nhiều sequence ghi cùng namespace.
 
 MERGE ghi cả hàng sai rồi **assert_true cuối file làm task fail**; kết quả sai vẫn tồn tại cho điều tra/BI.
-Assert yêu cầu đủ inventory (22/47/50), mọi check passed và cùng run/profile/hash, tránh trường hợp
+Assert yêu cầu đủ inventory (22/47/51), mọi check passed và cùng run/profile/hash, tránh trường hợp
 không có dòng hoặc chỉ có kết quả cũ mà vẫn xanh. AD-DE-18 phải truyền tham số thống nhất và chỉ cho
 refresh_bi chạy khi stage yêu cầu thành công; PR này chưa khai báo job điều phối.
 
@@ -109,5 +109,29 @@ Ngày 2026-11-19, chạy trên warehouse dev với profile `instacart_2017` và 
 | Sau khi khôi phục | `01f1e40a-d7ff-1cec-b9fe-f4f074b4ed4e` | 42,82 giây | MERGE khôi phục 22 check xanh sau khi trả kỳ vọng về 49.688 |
 
 Thời gian là từ khi gửi từng statement đến khi nhận trạng thái cuối. Hai lần chạy dùng cùng ngày và run ID.
-Cổng G3/G4 còn chờ dữ liệu AD-DE-14, AD-DE-15, AD-ST-07 và bảng fact Gold. G4 dùng FULL OUTER JOIN
+Cổng G3/G4 chính thức còn chờ bộ dữ liệu đã nghiệm thu của AD-DE-15 và nguồn Gold tương ứng. G4 dùng FULL OUTER JOIN
 trên số dòng của từng cặp khóa để kiểm cả khóa bị thiếu lẫn số lần xuất hiện bị lệch.
+
+## Diễn tập G3 trên toàn bộ release 2017
+
+Ngày 26/11/2026, dùng các file SQL của `9a7e5b6` với profile `instacart_2017`,
+run ID `ad17-ad22-dev-20261126` và ngày kiểm `2026-11-26`. Kết quả ghi vào
+`instacart.23521394_ad17_gates_ops.reconciliation`.
+
+- Bronze là `instacart.23521394_bronze`. Schema `instacart.23521394_ad17_gates_silver`
+  giữ view đọc Silver batch dev và lịch sử giá phục hồi của #215.
+- Hai view hợp nhất và `baskets` đến từ schema nghiệm thu AD-DE-15. Train đầy đủ
+  được ánh xạ theo hợp đồng Silver stream từ Bronze và `order_time_sim`.
+  Nguồn đó được mô tả trong [nghiệm thu AD-DE-15](03f_nghiem_thu_baskets.md#kết-quả-nghiệm-thu-dev).
+
+| Stage | Số check đạt | Số khóa phân biệt | Statement |
+|---|---:|---:|---|
+| Batch | 22/22 | 22 | `01f1e978-c05c-1618-9218-907a7257618a` |
+| G3 | 25/25 | 25 | `01f1e978-e7b9-1c78-8590-415f6cc11b59` |
+
+Các check xác nhận 3.421.083 đơn, 49.688 sản phẩm, 131.209 đơn train,
+1.384.617 món train và 0 phiên bản giá mở bị trùng. G3 chính thức còn chờ
+Silver stream của P3 sau AD-ST-07. Khi có quyền đọc, gắn hai bảng vào schema
+nghiệm thu, cập nhật view và refresh `baskets`, rồi chạy lại Batch → G3 với
+cùng bộ tham số cho cả hai stage. Ghi update ID của batch và stream dưới
+[issue #53](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/53).
