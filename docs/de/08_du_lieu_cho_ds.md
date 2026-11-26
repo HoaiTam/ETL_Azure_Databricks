@@ -147,6 +147,34 @@ cấp product khớp snapshot, index có 21 department và 134 aisle, và holdou
 - [ ] P4 (vai `ds`, không thuộc `de`) đọc được `ds_data.*` và volume `exports`; **không** ghi được (`INSERT` báo `PERMISSION_DENIED`). Không thử bằng P1 vì P1 thuộc `de`.
 - [ ] Báo DS (P4) rằng `v1` đã sẵn sàng; ghi ngày tạo `v1` vào [ds/00 §5](../ds/00_tong_quan_ds.md).
 
+### Nghiệm thu v1 trên dev
+
+Ngày 26/11/2026, tạo `v1` trong `instacart.23521394_ad21_ds_data` từ `instacart.23521394_ad17_replay_silver`
+đã đạt G3 ở [AD-DE-17](06c_nghiem_thu_reconciliation.md#nghiệm-thu-sau-replay-ad-st-07).
+Cả ba task đều thành công ở hai lượt. [Lượt đầu](https://adb-7405615740735217.17.azuredatabricks.net/jobs/977787802741923/runs/447868960559557?o=7405615740735217) ·
+[Lượt chạy lại](https://adb-7405615740735217.17.azuredatabricks.net/jobs/977787802741923/runs/971019481850633?o=7405615740735217)
+
+| Số liệu | Kết quả dev |
+|---|---:|
+| Giỏ prior / holdout trong snapshot | 3.214.874 / 131.209 |
+| Item cấp product / aisle / department | 49.677 / 134 / 21 |
+| Holdout dùng được theo val / test | 62.232 / 62.132 |
+| Dòng món holdout có sản phẩm chưa có trong prior | 9 |
+
+Manifest tại `/Volumes/instacart/23521394_ad21_ds_data/exports/v1/_manifest.json` có đủ 12 số đếm:
+
+| Cấp | 10% | 25% | 50% | 100% |
+|---|---:|---:|---:|---:|
+| product | 321.030 | 803.462 | 1.606.589 | 3.214.874 |
+| aisle | 321.030 | 803.462 | 1.606.589 | 3.214.874 |
+| department | 321.030 | 803.462 | 1.606.589 | 3.214.874 |
+
+Hai lượt kiểm `01f1e99a-339c-1383-b5f7-1ebfd72adcc4` và `01f1e99c-de1e-1e82-86d5-fbb3d21bac8c` cho cùng số dòng và cùng tổng
+`xxhash64` trên từng hàng nghiệp vụ của cả bảy bảng. Hai bản manifest trùng nội dung.
+Đã kiểm quyền hiệu lực của Trung trên schema dev và volume để bàn giao cho AD-DS-11.
+Bài thử bằng chính tài khoản DS đọc bảng, đọc file và bị từ chối `INSERT` được theo dõi
+ở [issue #57](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/57).
+
 ## 8. Lỗi giữa chừng thì chạy lại thế nào
 
 | Tình huống | Cách chạy lại | Vì sao không trùng / không mất |
