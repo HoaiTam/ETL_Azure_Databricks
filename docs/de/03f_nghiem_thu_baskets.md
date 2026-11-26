@@ -182,8 +182,10 @@ phát lại qua Event Hubs. Statement `01f1e983-3190-1d97-bce2-d418b6c81125` xá
 `replay_run_id = 'ad-st-07-6b780de-02'`. Bằng chứng AD-ST-07 ghi nhận update stream hoàn tất lúc 15:50:59 UTC ngày 25/11/2026.
 Cả hai bảng đang ở Delta version 3. Hai lượt MERGE ghi lúc 15:50:09 và 15:50:35 UTC,
 cập nhật đủ 131.209 header và 1.384.617 món, theo thứ tự.
-Pipeline nguồn có ID `b03c324b-78ee-42cc-99cf-e3c0980e861d`. P2 có quyền đọc bảng
-và đang chờ update ID do lịch sử pipeline yêu cầu quyền View riêng.
+Pipeline nguồn có ID `b03c324b-78ee-42cc-99cf-e3c0980e861d`. P3 bàn giao
+[update stream `23135f23-1169-4741-8382-6171b97d2213`](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/b03c324b-78ee-42cc-99cf-e3c0980e861d/updates/23135f23-1169-4741-8382-6171b97d2213):
+update thường bắt đầu 15:38:15 UTC ngày 25/11/2026, trạng thái `COMPLETED`, `eh_generation=g20261125_6b780de`.
+P1 kiểm thông tin update vì tài khoản P2 chỉ có quyền đọc bảng, không mở được lịch sử pipeline.
 
 Hai view nguồn trong `instacart.23521394_ad15_silver` trỏ trực tiếp đến hai bảng đã xác minh.
 Hai lượt chạy `create_views.sql` (`01f1e983-3693-1228-a512-81124ffa15c7` và `01f1e983-39c9-1689-b039-9f360cbb45f1`) đều báo `SUCCEEDED`.
