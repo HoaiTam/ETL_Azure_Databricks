@@ -465,10 +465,9 @@ và `n_items INT = size(items)` đếm số sản phẩm khác nhau. Header test
 ở batch, còn `dup_cnt` đếm giỏ theo mã đơn. Ba cột kỹ thuật phục vụ kiểm chất lượng.
 Header holdout đang chờ món được cảnh báo riêng. Snapshot AD-DE-20 kiểm miền số trước khi cast về INT.
 
-Mục tiêu full release sau khi phát đủ stream là **3.214.874 giỏ prior** và **131.209 giỏ holdout**.
-AD-ST-07 đã phát và replay đủ train qua Event Hubs. Số liệu stream và cách đối soát riêng `baskets`
-với hai bảng Silver sau replay được ghi trong
-[runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md#đối-soát-với-silver-sau-replay-ad-st-07).
+Trên full release sau replay AD-ST-07 qua Event Hubs, nghiệm thu dev có **3.214.874 giỏ prior**
+và **131.209 giỏ holdout**. Số khóa và nội dung giỏ khớp snapshot ngày 25/11 trên năm cột nghiệp vụ.
+Xem [runbook nghiệm thu](../de/03f_nghiem_thu_baskets.md#kết-quả-đối-soát-sau-replay).
 
 ## 7. Dữ liệu cho Data Science
 

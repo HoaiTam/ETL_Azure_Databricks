@@ -174,7 +174,29 @@ Kết quả ngày 25/11 ở trên là mốc so sánh cho lần đối soát này
 4. Ghi số liệu thực tế, ID hai update và ID statement đối soát vào mục này và
    [issue #51](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/51).
 
-Ngày 26/11/2026, truy vấn so sánh đã chạy trên kết quả dev ngày 25/11
-(statement `01f1e96c-a88a-14be-b57c-970333d69bf5`). Số giỏ, khóa phân biệt và tổng
-`n_items` khớp bảng trên, với 0 dòng chênh lệch mỗi chiều. Lượt đối soát với dữ liệu
-sau replay đang chờ P3 chia sẻ hai bảng Silver và link update stream.
+#### Kết quả đối soát sau replay
+
+Ngày 26/11/2026, tài khoản P2 đọc hai bảng Silver do pipeline AD-ST-07 tạo sau khi
+phát lại qua Event Hubs. Statement `01f1e983-3190-1d97-bce2-d418b6c81125` xác nhận 131.209 dòng header,
+131.209 khóa đơn, 1.384.617 dòng món và 1.384.617 khóa món. Toàn bộ header mang
+`replay_run_id = 'ad-st-07-6b780de-02'`. Bằng chứng AD-ST-07 ghi nhận update stream hoàn tất lúc 15:50:59 UTC ngày 25/11/2026.
+Cả hai bảng đang ở Delta version 3. Hai lượt MERGE ghi lúc 15:50:09 và 15:50:35 UTC,
+cập nhật đủ 131.209 header và 1.384.617 món, theo thứ tự.
+Pipeline nguồn có ID `b03c324b-78ee-42cc-99cf-e3c0980e861d`. P2 có quyền đọc bảng
+và đang chờ update ID do lịch sử pipeline yêu cầu quyền View riêng.
+
+Hai view nguồn trong `instacart.23521394_ad15_silver` trỏ trực tiếp đến hai bảng đã xác minh.
+Hai lượt chạy `create_views.sql` (`01f1e983-3693-1228-a512-81124ffa15c7` và `01f1e983-39c9-1689-b039-9f360cbb45f1`) đều báo `SUCCEEDED`.
+Pipeline Batch hoàn tất refresh thường với `enable_baskets=true`.
+[Update Batch `42a7b3c2-9dec-4d6a-aad4-5f6f5ebbfbbb`](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/c01b131c-6cf8-48dc-8d17-ffe4d6e9bc4f/updates/42a7b3c2-9dec-4d6a-aad4-5f6f5ebbfbbb).
+
+| Split | Số giỏ | Số khóa đơn phân biệt | Tổng `n_items` |
+|---|---:|---:|---:|
+| prior | 3.214.874 | 3.214.874 | 32.434.489 |
+| holdout | 131.209 | 131.209 | 1.384.617 |
+
+Statement `01f1e984-ab09-1c2e-a0d4-d4c9d34d50fa` trả **0 dòng mỗi chiều** khi so `EXCEPT ALL` với snapshot ngày 25/11
+trên `order_id`, `user_id`, `split`, `items` và `n_items`.
+Statement `01f1e984-b4e0-1cb5-88cc-3f47c0be23ec` xác nhận `orders` có 3.421.083 dòng và khóa đơn phân biệt, gồm 75.000 đơn test.
+`order_items` có 33.819.106 dòng và khóa món phân biệt. Có 0 khóa đơn giao giữa batch và stream,
+0 món mồ côi, 0 giỏ test và 0 giỏ sai hợp đồng.
