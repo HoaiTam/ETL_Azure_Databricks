@@ -142,6 +142,28 @@ Chạy file này sau `reconcile.sql` và `reconcile_g3.sql` đã đạt với c�
 `run_id`, `check_date`, profile và schema. Đây là phần đối soát fact của AD-DE-22.
 Check tổng hợp `department_sales` ở trên dùng khi bảng tổng hợp đã có.
 
+### Kết quả AD-DE-22 sau phục hồi giá
+
+Ngày 26/11/2026, chạy Batch, G3 và G4 cùng run ID `ad17-ad22-dev-20261126`
+với profile `instacart_2017`. Fact lấy từ `instacart.23521394_ad215_gold.fact_order_lines`
+sau [lượt phục hồi giá dev](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/8976818a-8bfe-4384-9c7e-97ddd1cb1611/updates/057878be-0d09-4e7a-a694-bd200facaf4f).
+Silver đối soát dùng dữ liệu dev cách ly với train từ Bronze và timestamp mô phỏng.
+
+`reconcile_g4.sql` hoàn tất (statement `01f1e978-f74a-19b6-8aef-11d582d29e9f`).
+Bảng `instacart.23521394_ad17_gates_ops.reconciliation` lưu bốn check đạt.
+
+| Check | Thực tế | Kỳ vọng |
+|---|---:|---:|
+| `g4.fact.rows` | 33.819.106 | 33.819.106 |
+| `g4.fact.no_fanout` | 0 | 0 |
+| `g4.fact.keys` | 0 | 0 |
+| `g4.fact.unpriced` | 0 | 0 |
+
+Số cặp khóa phân biệt của fact cũng là 33.819.106. G4 chính thức còn chờ
+nguồn Silver stream sau replay và kết quả nạp file phục hồi trên prod.
+Sau khi các nguồn sẵn sàng, refresh fact và tái đối soát đủ Batch → G3 → G4
+trên cùng bộ nguồn; ghi update ID và bốn check ở [issue #58](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/58).
+
 ### 4.1 Đo thời gian refresh fact
 
 Chọn update đã `COMPLETED`, giữ lại update ID và số dòng đối soát, rồi lấy mốc thời
