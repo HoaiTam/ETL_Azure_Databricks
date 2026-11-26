@@ -142,6 +142,28 @@ Chạy file này sau `reconcile.sql` và `reconcile_g3.sql` đã đạt với c�
 `run_id`, `check_date`, profile và schema. Đây là phần đối soát fact của AD-DE-22.
 Check tổng hợp `department_sales` ở trên dùng khi bảng tổng hợp đã có.
 
+### Kết quả AD-DE-22 sau phục hồi giá
+
+Ngày 26/11/2026, chạy Batch, G3 và G4 cùng run ID `ad17-ad22-dev-20261126`
+với profile `instacart_2017`. Fact lấy từ `instacart.23521394_ad215_gold.fact_order_lines`
+sau [lượt phục hồi giá dev](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/8976818a-8bfe-4384-9c7e-97ddd1cb1611/updates/057878be-0d09-4e7a-a694-bd200facaf4f).
+Silver đối soát dùng dữ liệu dev cách ly với train từ Bronze và timestamp mô phỏng.
+
+`reconcile_g4.sql` hoàn tất (statement `01f1e978-f74a-19b6-8aef-11d582d29e9f`).
+Bảng `instacart.23521394_ad17_gates_ops.reconciliation` lưu bốn check đạt.
+
+| Check | Thực tế | Kỳ vọng |
+|---|---:|---:|
+| `g4.fact.rows` | 33.819.106 | 33.819.106 |
+| `g4.fact.no_fanout` | 0 | 0 |
+| `g4.fact.keys` | 0 | 0 |
+| `g4.fact.unpriced` | 0 | 0 |
+
+Số cặp khóa phân biệt của fact cũng là 33.819.106. G4 chính thức còn chờ
+nguồn Silver stream sau replay và kết quả nạp file phục hồi trên prod.
+Sau khi các nguồn sẵn sàng, refresh fact và tái đối soát đủ Batch → G3 → G4
+trên cùng bộ nguồn; ghi update ID và bốn check ở [issue #58](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/58).
+
 ### 4.1 Đo thời gian refresh fact
 
 Chọn update đã `COMPLETED`, giữ lại update ID và số dòng đối soát, rồi lấy mốc thời
@@ -175,6 +197,28 @@ Ghi cả thời gian flow và thời gian update trong báo cáo benchmark, kèm
 loại compute. Thời gian flow lấy từ event `STARTING` hoặc `RUNNING` đến `COMPLETED`,
 còn thời gian update gồm khởi tạo compute và các flow khác.
 [Pipeline event log](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
+
+### 4.2 Nghiệm thu bảng phục vụ BI (AD-DE-23)
+
+Ngày 26/11/2026, đối soát riêng trong `instacart.23521394_ad22_gold` với
+[update dev đã hoàn tất](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/d807a4b7-573e-4311-8e1f-f7a97f9cc5f8/updates/aa6bc823-e815-4874-b948-f62ab110864c).
+Statement `01f1e96f-2259-11f2-87cb-45946eda025f` xác nhận:
+
+| Kiểm tra | Kết quả dev |
+|---|---:|
+| Fact, số dòng và số khóa `(order_id, product_id)` | 33.819.106 |
+| Tổng `items` của từng bảng `department_sales`, `kpi_daily`, `kpi_by_dow_hour` | 33.819.106 |
+| `product_360`, số dòng và số sản phẩm phân biệt | 49.688 |
+| `dim_date` / `dim_department` | 4.138 / 21 |
+| `bi_user_access` | 0 |
+
+Lượt đo dùng train từ Bronze, đồng hồ mô phỏng và seed quyền dev rỗng.
+Sau AD-DE-22, P4 dùng danh tính BI thật trên warehouse để đọc `gold.department_sales`
+và xác nhận Power BI nhận được phạm vi phòng ban đúng. Chỉ ghi tổng số người và phòng ban
+từ `gold.bi_user_access` vào issue. P4 có thêm vai `ds`, nên dùng tài khoản chỉ thuộc vai
+`bi` nếu có để thử truy cập Silver bị từ chối. Nếu chưa có tài khoản chỉ có vai `bi`,
+nhờ P1 xác nhận quyền hiệu lực của nhóm `bi` trên Gold và Silver, gồm grant kế thừa từ
+catalog. Ghi kết quả riêng với đối soát dữ liệu ở trên vào [issue #59](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/59).
 
 ## 5. Tối ưu lưu trữ và đọc/ghi (rubric 3.1, 3.4)
 

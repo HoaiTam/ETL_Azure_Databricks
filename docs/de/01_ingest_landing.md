@@ -353,6 +353,23 @@ dùng mặc định `bronze`.
 Hai pipeline được bàn giao qua [hợp đồng ADF](../../adf/README.md#điều-phối-batch-ad-de-19).
 P1 publish qua AD-OPS-26 với trigger tắt. Lịch 02:00 chỉ được bật sau lượt chạy tay đạt.
 
+### Nghiệm thu AD-DE-19 trên Azure
+
+1. Kiểm trong ADF Studio hoặc ARM API rằng đã publish cả `pl_master` và `pl_ingest_off`
+   theo AD-OPS-26. Kiểm trigger lịch chưa ở trạng thái `Started`.
+2. Chạy tay `pl_master` và mở **Monitor → Pipeline runs**. Giữ run ID của pipeline cha và
+   trạng thái từng activity. Chuỗi CDC → OFF → batch đều phải `Succeeded`.
+3. Từ output activity batch, mở run Databricks. So tham số `adf_run_id` với run ID cha,
+   rồi đối chiếu bản ghi trong `ops.pipeline_runs` theo đúng Databricks `run_id`.
+4. Dùng một bản Debug chưa publish trong cùng factory để làm CDC lỗi có chủ đích.
+   Kiểm batch bị `Skipped`, pipeline cha `Failed` và không tạo run Databricks batch mới
+   gắn với ADF run ID đó. Giữ nguyên trigger và pipeline đang publish.
+
+Ngày 26/11/2026, ARM API liệt kê 5 pipeline đã publish ở factory prod, có
+`pl_ingest_retail_db` nhưng chưa có hai pipeline trên và chưa có trigger.
+Chưa có ADF RunId của `pl_master`. Chờ [AD-OPS-26](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/28)
+publish trước khi chạy checklist này cho [AD-DE-19](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/55).
+
 ## 6. Lỗi giữa chừng thì chạy lại thế nào
 
 | Lỗi ở | Làm gì | Vì sao an toàn |
