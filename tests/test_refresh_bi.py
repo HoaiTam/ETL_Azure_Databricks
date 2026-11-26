@@ -85,6 +85,7 @@ def test_failure_audit_and_successful_repair_write_one_row_without_calling_api(s
     assert row.status == "failed" and row.rows_processed is None
 
     args.mode = "refresh"
+    args.adf_run_id = "manual"
     put("silver.prior.rows", True)
     run_task(spark, args, load_secrets=unexpected, post=unexpected)
     (row,) = recorded()
