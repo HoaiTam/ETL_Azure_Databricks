@@ -159,10 +159,31 @@ Bảng `instacart.23521394_ad17_gates_ops.reconciliation` lưu bốn check đạ
 | `g4.fact.keys` | 0 | 0 |
 | `g4.fact.unpriced` | 0 | 0 |
 
-Số cặp khóa phân biệt của fact cũng là 33.819.106. G4 chính thức còn chờ
-nguồn Silver stream sau replay và kết quả nạp file phục hồi trên prod.
-Sau khi các nguồn sẵn sàng, refresh fact và tái đối soát đủ Batch → G3 → G4
-trên cùng bộ nguồn; ghi update ID và bốn check ở [issue #58](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/58).
+Số cặp khóa phân biệt của fact cũng là 33.819.106. Lượt diễn tập này dùng
+train từ Bronze. Bước xác nhận phục hồi giá ở prod được theo dõi riêng tại
+[issue #215](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/215).
+
+#### Đối soát G4 với Silver stream đã replay
+
+Ngày `2026-11-26`, dùng đúng lượt Batch → G3 → G4 của AD-DE-17, run ID
+`ad17-replay-20261126-730929c6` và profile `instacart_2017`. Silver hợp nhất đọc từ
+`23521394_ad15_silver` sau replay AD-ST-07. Fact dev
+`instacart.23521394_ad215_gold.fact_order_lines` lấy từ lượt refresh sau khi phục hồi
+giá gốc. G4 đối chiếu trực tiếp các khóa của fact với `silver.order_items` của lượt chạy này.
+
+Hai lượt G4 đều `SUCCEEDED` (`01f1e988-b0c2-1878-a639-a73e3fc64cf7` và `01f1e988-e104-15a7-bf86-e6e15236ad32`).
+Bản ghi cuối ở `instacart.23521394_ad17_replay_ops.reconciliation`, statement đọc
+`01f1e988-ed0b-1632-a971-b038698474af`:
+
+| Check | Thực tế | Kỳ vọng |
+|---|---:|---:|
+| `g4.fact.rows` | 33.819.106 | 33.819.106 |
+| `g4.fact.no_fanout` | 0 | 0 |
+| `g4.fact.keys` | 0 | 0 |
+| `g4.fact.unpriced` | 0 | 0 |
+
+[Xác nhận nguồn Silver](03f_nghiem_thu_baskets.md#kết-quả-đối-soát-sau-replay) ·
+[Issue AD-DE-22](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/58).
 
 ### 4.1 Đo thời gian refresh fact
 
