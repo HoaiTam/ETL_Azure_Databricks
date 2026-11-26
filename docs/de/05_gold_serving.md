@@ -160,8 +160,8 @@ Bảng `instacart.23521394_ad17_gates_ops.reconciliation` lưu bốn check đạ
 | `g4.fact.unpriced` | 0 | 0 |
 
 Số cặp khóa phân biệt của fact cũng là 33.819.106. Lượt diễn tập này dùng
-train từ Bronze. Bước xác nhận phục hồi giá ở prod được theo dõi riêng tại
-[issue #215](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/215).
+train từ Bronze. Phục hồi giá trên prod đã xong ngày 26/11/2026: Silver prod có đủ 49.688
+giá gốc ([issue #215](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/215)).
 
 #### Đối soát G4 với Silver stream đã replay
 
