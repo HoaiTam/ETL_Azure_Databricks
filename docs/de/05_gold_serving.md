@@ -198,6 +198,28 @@ loại compute. Thời gian flow lấy từ event `STARTING` hoặc `RUNNING` đ
 còn thời gian update gồm khởi tạo compute và các flow khác.
 [Pipeline event log](https://learn.microsoft.com/en-us/azure/databricks/ldp/monitor-event-logs).
 
+### 4.2 Nghiệm thu bảng phục vụ BI (AD-DE-23)
+
+Ngày 26/11/2026, đối soát riêng trong `instacart.23521394_ad22_gold` với
+[update dev đã hoàn tất](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/d807a4b7-573e-4311-8e1f-f7a97f9cc5f8/updates/aa6bc823-e815-4874-b948-f62ab110864c).
+Statement `01f1e96f-2259-11f2-87cb-45946eda025f` xác nhận:
+
+| Kiểm tra | Kết quả dev |
+|---|---:|
+| Fact, số dòng và số khóa `(order_id, product_id)` | 33.819.106 |
+| Tổng `items` của từng bảng `department_sales`, `kpi_daily`, `kpi_by_dow_hour` | 33.819.106 |
+| `product_360`, số dòng và số sản phẩm phân biệt | 49.688 |
+| `dim_date` / `dim_department` | 4.138 / 21 |
+| `bi_user_access` | 0 |
+
+Lượt đo dùng train từ Bronze, đồng hồ mô phỏng và seed quyền dev rỗng.
+Sau AD-DE-22, P4 dùng danh tính BI thật trên warehouse để đọc `gold.department_sales`
+và xác nhận Power BI nhận được phạm vi phòng ban đúng. Chỉ ghi tổng số người và phòng ban
+từ `gold.bi_user_access` vào issue. P4 có thêm vai `ds`, nên dùng tài khoản chỉ thuộc vai
+`bi` nếu có để thử truy cập Silver bị từ chối. Nếu chưa có tài khoản chỉ có vai `bi`,
+nhờ P1 xác nhận quyền hiệu lực của nhóm `bi` trên Gold và Silver, gồm grant kế thừa từ
+catalog. Ghi kết quả riêng với đối soát dữ liệu ở trên vào [issue #59](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/59).
+
 ## 5. Tối ưu lưu trữ và đọc/ghi (rubric 3.1, 3.4)
 
 | Kỹ thuật | Áp dụng | Hiệu quả kỳ vọng |
