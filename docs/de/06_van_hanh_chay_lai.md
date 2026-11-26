@@ -53,7 +53,8 @@ Chạy batch tách thời gian với crawler, seed và stream để vừa quota 
 Khi repair task pipeline, dùng task run ID mới và chạy lại các task phụ thuộc. Khi chỉ repair
 `reconcile`, làm lại với cùng job run ID và ngày kiểm tra. Mục 4 mô tả khóa MERGE và cách đọc hàng lỗi.
 Khi gọi Jobs Repair API cho run từ ADF, truyền lại `job_parameters.adf_run_id` của run gốc
-để các task audit nhận đúng mã ADF.
+nếu lượt đầu chưa ghi được audit. Khi cùng Databricks run đã có bản ghi với mã ADF,
+audit giữ mã đó nếu lượt repair nhận giá trị mặc định `manual`.
 
 Cảnh báo lỗi và vượt 60 phút nhận danh sách email từ biến bundle `batch_email_notifications`.
 Ở dev, đặt giá trị trong `bundles/.databricks/bundle/dev/variable-overrides.json`. Giá trị của biến là
@@ -87,6 +88,10 @@ Lần repair đầu bỏ qua `job_parameters` nên audit dùng `manual`. Repair 
 `adf_run_id` gốc đã cập nhật đúng bản ghi cùng run. Statement
 `01f1e8a1-f2be-1d07-b0ac-5f92b40b784f` xác nhận cả hai dòng audit `succeeded`, đủ 22 check
 đạt và đúng mã đầu vào của từng lượt.
+
+Ngày 26/11/2026, [job Spark serverless dev cách ly](https://adb-7405615740735217.17.azuredatabricks.net/jobs/897154538975830/runs/224870641066?o=7405615740735217)
+kiểm trường hợp repair nhận mặc định `manual`. Cùng một Databricks run có đúng một
+dòng audit, giữ mã ADF gốc và cập nhật trạng thái từ `failed` thành `succeeded`.
 
 Nghiệm thu cuối của issue [#54](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/54)
 vẫn theo dõi AD-DE-15, AD-DE-16 và AD-DE-17. Phần tạo view và đối soát G3/G4 cần đủ nguồn stream.
