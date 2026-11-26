@@ -149,3 +149,32 @@ Refresh thường lần hai trên cùng nguồn cho kết quả `EXCEPT ALL` b�
 trên năm cột nghiệp vụ, so với bản chụp 3.346.083 giỏ của lượt đầu. Statement đối chiếu
 `01f1e89a-1890-1f8e-80a0-d401ce8159d6` báo `SUCCEEDED`.
 [Update lần hai](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/c01b131c-6cf8-48dc-8d17-ffe4d6e9bc4f/updates/efb1fbe4-f727-47aa-a9a2-0225523b766e).
+
+### Đối soát với Silver sau replay AD-ST-07
+
+AD-ST-07 đã phát và phát lại toàn bộ train qua Event Hubs. Sau lượt `ad-st-07-6b780de-02`,
+Silver giữ 131.209 khóa đơn và 1.384.617 khóa `(order_id, product_id)`. Xem
+[bằng chứng của pipeline stream](evidence/ad-st-07/2026-11-25-train-replay.md).
+Kết quả ngày 25/11 ở trên là mốc so sánh cho lần đối soát này.
+
+1. Lấy tên đầy đủ của `stream_orders`, `stream_order_items` và link update stream hoàn tất
+   từ P3. Dùng danh tính P2 có `USE CATALOG`, `USE SCHEMA` và `SELECT` để đọc hai bảng.
+   Kiểm số dòng và khóa phân biệt khớp bằng chứng AD-ST-07, và toàn bộ header mang
+   `replay_run_id = 'ad-st-07-6b780de-02'`. Giữ nguyên hai bảng trong lúc đối soát.
+2. Trong `instacart.23521394_ad15_silver`, thay định nghĩa hai view nguồn dev
+   `stream_orders`, `stream_order_items` để đọc trực tiếp hai bảng ở bước 1.
+   Giữ nguồn batch và bảng `basket_acceptance_before` đã chụp ngày 25/11.
+   Chạy lại toàn bộ `create_views.sql` hai lần với cùng catalog/schema.
+3. Refresh thường pipeline batch dev nghiệm thu với `enable_baskets=true`, đợi update
+   báo `COMPLETED`. Chạy lại các kiểm tra ở mục [Đối soát thật](#đối-soát-thật) và chạy
+   [truy vấn so sánh snapshot](baskets_replay_reconciliation.sql) trong schema nghiệm thu.
+   Truy vấn phải trả đúng hai split, với số giỏ bằng số khóa phân biệt ở mỗi split.
+   Kỳ vọng `prior` có 3.214.874 giỏ và 32.434.489 món, `holdout` có 131.209 giỏ và
+   1.384.617 món, cùng 0 dòng chênh lệch ở mỗi chiều `EXCEPT ALL` trên năm cột nghiệp vụ.
+4. Ghi số liệu thực tế, ID hai update và ID statement đối soát vào mục này và
+   [issue #51](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/51).
+
+Ngày 26/11/2026, truy vấn so sánh đã chạy trên kết quả dev ngày 25/11
+(statement `01f1e96c-a88a-14be-b57c-970333d69bf5`). Số giỏ, khóa phân biệt và tổng
+`n_items` khớp bảng trên, với 0 dòng chênh lệch mỗi chiều. Lượt đối soát với dữ liệu
+sau replay đang chờ P3 chia sẻ hai bảng Silver và link update stream.
