@@ -149,3 +149,56 @@ Refresh thường lần hai trên cùng nguồn cho kết quả `EXCEPT ALL` b�
 trên năm cột nghiệp vụ, so với bản chụp 3.346.083 giỏ của lượt đầu. Statement đối chiếu
 `01f1e89a-1890-1f8e-80a0-d401ce8159d6` báo `SUCCEEDED`.
 [Update lần hai](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/c01b131c-6cf8-48dc-8d17-ffe4d6e9bc4f/updates/efb1fbe4-f727-47aa-a9a2-0225523b766e).
+
+### Đối soát với Silver sau replay AD-ST-07
+
+AD-ST-07 đã phát và phát lại toàn bộ train qua Event Hubs. Sau lượt `ad-st-07-6b780de-02`,
+Silver giữ 131.209 khóa đơn và 1.384.617 khóa `(order_id, product_id)`. Xem
+[bằng chứng của pipeline stream](evidence/ad-st-07/2026-11-25-train-replay.md).
+Kết quả ngày 25/11 ở trên là mốc so sánh cho lần đối soát này.
+
+1. Lấy tên đầy đủ của `stream_orders`, `stream_order_items` và link update stream hoàn tất
+   từ P3. Dùng danh tính P2 có `USE CATALOG`, `USE SCHEMA` và `SELECT` để đọc hai bảng.
+   Kiểm số dòng và khóa phân biệt khớp bằng chứng AD-ST-07, và toàn bộ header mang
+   `replay_run_id = 'ad-st-07-6b780de-02'`. Giữ nguyên hai bảng trong lúc đối soát.
+2. Trong `instacart.23521394_ad15_silver`, thay định nghĩa hai view nguồn dev
+   `stream_orders`, `stream_order_items` để đọc trực tiếp hai bảng ở bước 1.
+   Giữ nguồn batch và bảng `basket_acceptance_before` đã chụp ngày 25/11.
+   Chạy lại toàn bộ `create_views.sql` hai lần với cùng catalog/schema.
+3. Refresh thường pipeline batch dev nghiệm thu với `enable_baskets=true`, đợi update
+   báo `COMPLETED`. Chạy lại các kiểm tra ở mục [Đối soát thật](#đối-soát-thật) và chạy
+   [truy vấn so sánh snapshot](baskets_replay_reconciliation.sql) trong schema nghiệm thu.
+   Truy vấn phải trả đúng hai split, với số giỏ bằng số khóa phân biệt ở mỗi split.
+   Kỳ vọng `prior` có 3.214.874 giỏ và 32.434.489 món, `holdout` có 131.209 giỏ và
+   1.384.617 món, cùng 0 dòng chênh lệch ở mỗi chiều `EXCEPT ALL` trên năm cột nghiệp vụ.
+4. Ghi số liệu thực tế, ID hai update và ID statement đối soát vào mục này và
+   [issue #51](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/51).
+
+#### Kết quả đối soát sau replay
+
+Ngày 26/11/2026, tài khoản P2 đọc hai bảng Silver do pipeline AD-ST-07 tạo sau khi
+phát lại qua Event Hubs. Statement `01f1e983-3190-1d97-bce2-d418b6c81125` xác nhận 131.209 dòng header,
+131.209 khóa đơn, 1.384.617 dòng món và 1.384.617 khóa món. Toàn bộ header mang
+`replay_run_id = 'ad-st-07-6b780de-02'`. Bằng chứng AD-ST-07 ghi nhận update stream hoàn tất lúc 15:50:59 UTC ngày 25/11/2026.
+Cả hai bảng đang ở Delta version 3. Hai lượt MERGE ghi lúc 15:50:09 và 15:50:35 UTC,
+cập nhật đủ 131.209 header và 1.384.617 món, theo thứ tự.
+Pipeline nguồn có ID `b03c324b-78ee-42cc-99cf-e3c0980e861d`. P3 bàn giao
+[update stream `23135f23-1169-4741-8382-6171b97d2213`](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/b03c324b-78ee-42cc-99cf-e3c0980e861d/updates/23135f23-1169-4741-8382-6171b97d2213):
+update thường bắt đầu 15:38:15 UTC ngày 25/11/2026, trạng thái `COMPLETED`, `eh_generation=g20261125_6b780de`.
+P1 kiểm thông tin update vì tài khoản P2 chỉ có quyền đọc bảng, không mở được lịch sử pipeline.
+
+Hai view nguồn trong `instacart.23521394_ad15_silver` trỏ trực tiếp đến hai bảng đã xác minh.
+Hai lượt chạy `create_views.sql` (`01f1e983-3693-1228-a512-81124ffa15c7` và `01f1e983-39c9-1689-b039-9f360cbb45f1`) đều báo `SUCCEEDED`.
+Pipeline Batch hoàn tất refresh thường với `enable_baskets=true`.
+[Update Batch `42a7b3c2-9dec-4d6a-aad4-5f6f5ebbfbbb`](https://adb-7405615740735217.17.azuredatabricks.net/#joblist/pipelines/c01b131c-6cf8-48dc-8d17-ffe4d6e9bc4f/updates/42a7b3c2-9dec-4d6a-aad4-5f6f5ebbfbbb).
+
+| Split | Số giỏ | Số khóa đơn phân biệt | Tổng `n_items` |
+|---|---:|---:|---:|
+| prior | 3.214.874 | 3.214.874 | 32.434.489 |
+| holdout | 131.209 | 131.209 | 1.384.617 |
+
+Statement `01f1e984-ab09-1c2e-a0d4-d4c9d34d50fa` trả **0 dòng mỗi chiều** khi so `EXCEPT ALL` với snapshot ngày 25/11
+trên `order_id`, `user_id`, `split`, `items` và `n_items`.
+Statement `01f1e984-b4e0-1cb5-88cc-3f47c0be23ec` xác nhận `orders` có 3.421.083 dòng và khóa đơn phân biệt, gồm 75.000 đơn test.
+`order_items` có 33.819.106 dòng và khóa món phân biệt. Có 0 khóa đơn giao giữa batch và stream,
+0 món mồ côi, 0 giỏ test và 0 giỏ sai hợp đồng.
