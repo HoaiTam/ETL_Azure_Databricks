@@ -683,15 +683,17 @@ Mốc DS-4 phần đánh giá: FP-Growth product 100% ở 3 MinSupp, lưu luật
 - **Hoàn tất còn cần:** Không có.
 - **Mở khóa:** [AD-DS-22](05_data_science.md#ad-ds-22) (hoàn tất), [AD-DS-23](05_data_science.md#ad-ds-23) (bắt đầu), [AD-DS-24](05_data_science.md#ad-ds-24) (hoàn tất), [AD-DS-26](05_data_science.md#ad-ds-26) (hoàn tất)
 
-Bước D6: chọn cấu hình theo quy tắc ghi trước (coverage ≥ 0,5, HitRate@10 cao nhất trên val, phải hơn baseline), rồi đóng gói model có alias @champion.
+Bước D6: chọn cấu hình E7 có coverage ≥ 0,5 và HitRate@10 cao nhất trên val; hòa thì chọn cấu hình có ít luật đạt ngưỡng hơn. So với baseline popularity và ghi kết luận (kể cả khi champion không hơn baseline), sau đó vẫn đăng ký model có alias @champion.
 
 **Việc cần làm**
 
 1. Ghi quy tắc chọn §2.1 vào báo cáo trước khi xem kết quả
-2. Viết src/ml/champion.py: chọn cấu hình, xuất Parquet rules/items, register pyfunc vào instacart.ml.basket_rules, gán alias champion ở bước cuối, ghi ml.champion
-3. Xuất thêm 2 file Parquet vào container ds-data/serving/ cho phương án B của API
-4. Chạy evaluate_holdout cho champion × test
+2. Viết src/ml/champion.py: chọn cấu hình, xuất Parquet rules/items làm artifact model, register pyfunc vào instacart.ml.basket_rules, gán alias champion, MERGE idempotent vào ml.champion
+3. Ghim phiên bản đang chạy của mlflow, pandas, numpy và pyarrow trong môi trường model
+4. Chạy evaluate_holdout cho champion × test; so val với baseline và ghi rõ kết luận dương/âm
 5. Thêm job ds_champion vào bundles/resources/jobs_ds.yml: evaluate_holdout → champion → publish_gold, chạy tay
+6. Bung sweep.min_confidence trong evaluate_holdout --all-e7 để chấm đủ 9 ngưỡng E7
+7. Tách ingest_local khỏi ds-benchmark thành job tay riêng để benchmark không phụ thuộc volume E6
 
 **Đầu ra**
 
@@ -703,7 +705,8 @@ Bước D6: chọn cấu hình theo quy tắc ghi trước (coverage ≥ 0,5, Hi
 
 - [ ] mlflow.pyfunc.load_model('models:/instacart.ml.basket_rules@champion') predict được trên Databricks
 - [ ] ml.champion trỏ đúng run_key; ml.holdout_metrics có champion × test
-- [ ] Kết luận champion có hơn baseline hay không đã ghi rõ
+- [ ] Kết luận champion có hơn baseline hay không đã ghi rõ; dù kết luận âm vẫn có phiên bản model và alias
+- [ ] pytest phần chọn champion đạt; bundle validate -t dev đạt
 
 ### AD-DS-22
 
@@ -750,18 +753,18 @@ Bước D7: Power BI chỉ đọc gold; view chạy bằng quyền chủ view n�
 - **Hoàn tất còn cần:** Không có.
 - **Mở khóa:** [AD-OPS-31](01_devops.md#ad-ops-31) (hoàn tất), [AD-DS-24](05_data_science.md#ad-ds-24) (hoàn tất), [AD-DS-27](05_data_science.md#ad-ds-27) (hoàn tất)
 
-Phương án A của API: endpoint serverless scale-to-zero phục vụ phiên bản champion; đổi champion chỉ cần deploy lại với biến champion_version.
+Phương án A của API: endpoint serverless scale-to-zero phục vụ phiên bản champion; đổi champion chỉ cần deploy lại bundle riêng `bundles/serving` với biến champion_version. Bundle chỉ chứa endpoint, tách khỏi jobs và pipelines của deploy chính để chỉ tạo endpoint sau lượt ds-champion đầu tiên.
 
 **Việc cần làm**
 
-1. Viết bundles/resources/serving_ds.yml (biến champion_version, workload Small, scale_to_zero, quyền ds CAN_MANAGE, SP func CAN_QUERY)
-2. databricks bundle validate rồi deploy dev với champion_version của model
-3. Gọi curl invocations với giỏ mẫu, đo thời gian khi đã nóng; chụp ảnh
+1. Viết bundle riêng bundles/serving (endpoint workload Small, scale_to_zero, user CAN_MANAGE, SP func CAN_QUERY)
+2. Sau khi #106 đăng ký model đầu tiên, deploy bundle serving với champion_version và func_sp_application_id
+3. Gọi curl invocations với giỏ mẫu, xác nhận đủ 10 gợi ý, đo thời gian khi đã nóng; chụp ảnh
 4. Ghi lại thời gian cold start
 
 **Đầu ra**
 
-- bundles/resources/serving_ds.yml
+- bundles/serving/databricks.yml và bundles/serving/resources/serving_ds.yml
 - Endpoint instacart-basket-rules READY; ảnh chụp curl
 
 **Xong khi**

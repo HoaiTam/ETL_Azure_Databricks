@@ -56,6 +56,7 @@ Code ở [`src/ml/serving/basket_rules.py`](../../src/ml/serving/basket_rules.py
 ```python
 # src/ml/champion.py  (phần đăng ký; việc chọn cấu hình theo §2.1 nằm ở đầu file)
 import os
+from importlib.metadata import version
 
 import mlflow
 import pandas as pd
@@ -65,10 +66,12 @@ from mlflow.models import infer_signature
 from ml.serving.basket_rules import BasketRules
 
 MODEL = "instacart.ml.basket_rules"
-ML_PKG = os.path.dirname(os.path.abspath(__file__))                       # src/ml → đóng gói kèm model
+ML_PKG_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # src → giữ nguyên package ml
+PINNED_PACKAGES = ("mlflow", "pandas", "numpy", "pyarrow")
 
 
 def register(rules_path: str, items_path: str, run_key: str, min_conf: float) -> int:
+    package_pins = [f"{name}=={version(name)}" for name in PINNED_PACKAGES]
     mlflow.set_registry_uri("databricks-uc")
     mlflow.set_experiment("/Shared/instacart-ds")
     example = pd.DataFrame({"product_ids": [[24852, 13176]]})               # chuối + túi chuối hữu cơ
@@ -80,8 +83,8 @@ def register(rules_path: str, items_path: str, run_key: str, min_conf: float) ->
         signature = infer_signature(example, model.predict(None, example), params={"k": 10})
         info = mlflow.pyfunc.log_model(
             artifact_path="model", python_model=BasketRules(), signature=signature, input_example=example,
-            artifacts={"rules": rules_path, "items": items_path}, pip_requirements=["pandas", "pyarrow"],
-            code_paths=[ML_PKG],                                       # endpoint import được ml.serving.*
+            artifacts={"rules": rules_path, "items": items_path}, pip_requirements=package_pins,
+            code_paths=[ML_PKG_ROOT],                                  # endpoint import được ml.serving.*
             registered_model_name=MODEL)
     version = int(info.registered_model_version)
     MlflowClient().set_registered_model_alias(MODEL, "champion", version)
@@ -100,12 +103,10 @@ def register(rules_path: str, items_path: str, run_key: str, min_conf: float) ->
 
 ### 3.1 Phương án A (mặc định): Databricks Model Serving
 
-Endpoint khai báo trong DAB. Phiên bản model truyền vào bằng biến lúc deploy, nên đổi champion chỉ cần deploy lại:
+Endpoint nằm trong bundle riêng `bundles/serving/`, vì vậy deploy không kéo theo jobs và pipelines của bundle chính. Chỉ deploy bundle này sau khi job `ds-champion` đã đăng ký model lần đầu; truyền phiên bản model và client ID của Function khi deploy:
 
 ```yaml
-# bundles/resources/serving_ds.yml
-variables:
-  champion_version: { default: "1" }
+# bundles/serving/resources/serving_ds.yml
 resources:
   model_serving_endpoints:
     basket_rules:
@@ -115,17 +116,26 @@ resources:
           - entity_name: instacart.ml.basket_rules
             entity_version: ${var.champion_version}
             workload_size: Small
-            scale_to_zero_enabled: true                 # không có request thì không tốn tiền
+            scale_to_zero_enabled: true
       permissions:
-        - { group_name: ds, level: CAN_MANAGE }
-        - { service_principal_name: "${var.func_sp_application_id}", level: CAN_QUERY }
+        - user_name: ${workspace.current_user.userName}
+          level: CAN_MANAGE
+        - service_principal_name: ${var.func_sp_application_id}
+          level: CAN_QUERY
+```
+
+Deploy thủ công sau lần chạy `ds-champion` đầu tiên. Workspace URL và hồ sơ CLI phải trỏ đến workspace prod; truyền client ID của identity `id-func-recommend` cùng version vừa đăng ký:
+
+```bash
+cd bundles/serving
+databricks bundle deploy -t prod --var="champion_version=<version>" --var="func_sp_application_id=<client-id>"
 ```
 
 ```bash
 curl -s -X POST "https://$DATABRICKS_HOST/serving-endpoints/instacart-basket-rules/invocations" \
   -H "Authorization: Bearer $(az account get-access-token --resource 2ff814a6-3304-4ab8-85cb-cd0e6f879c1d --query accessToken -o tsv)" \
   -H "Content-Type: application/json" \
-  -d '{"dataframe_records": [{"product_ids": [24852, 13176]}], "params": {"k": 5}}'
+  -d '{"dataframe_records": [{"product_ids": [24852, 13176]}], "params": {"k": 10}}'
 ```
 
 - **Spike bắt buộc** ([devops/01 §3.4](../devops/01_chuan_bi_va_spike.md)): Model Serving là dịch vụ serverless. Cần kiểm tra subscription Azure for Students và region đã chốt có cho tạo endpoint hay không.
