@@ -241,6 +241,31 @@ từ `gold.bi_user_access` vào issue. P4 có thêm vai `ds`, nên dùng tài kh
 nhờ P1 xác nhận quyền hiệu lực của nhóm `bi` trên Gold và Silver, gồm grant kế thừa từ
 catalog. Ghi kết quả riêng với đối soát dữ liệu ở trên vào [issue #59](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/59).
 
+#### Kiểm điều kiện thử quyền BI trên Sub D
+
+Ngày 28/11/2026, warehouse serverless `wh-instacart-bi` đã có trên Sub D.
+`instacart.silver.orders_batch` đã tồn tại, còn schema `instacart.gold` chưa có
+bảng phục vụ BI trên phiên P2 kiểm tra. Quyền hiệu lực trả về cho phiên P2 là
+`ALL_PRIVILEGES` trên cả hai schema. Phiên P2 thiếu quyền `CAN_MANAGE` để đọc ACL
+của warehouse.
+
+[Terraform](../../infra/envs/30-databricks.tfvars) gán vai `bi` cho P4, đồng thời
+P4 có vai `ds`. Stack áp dụng hợp quyền theo từng thành viên. Vai `bi` có
+`USE_SCHEMA` và `SELECT` trên Gold; quyền đọc Silver của P4 đến từ vai `ds`.
+
+Sau khi Gold prod có `department_sales`, P1 xác nhận một tài khoản chỉ có vai
+`bi` được dùng warehouse và kiểm quyền kế thừa từ catalog. Tài khoản đó chạy
+hai statement riêng trên `wh-instacart-bi`:
+
+```sql
+SELECT 1 FROM instacart.gold.department_sales LIMIT 1;
+SELECT 1 FROM instacart.silver.orders_batch LIMIT 1;
+```
+
+Gold phải chạy thành công. Silver phải trả lỗi phân quyền như `PERMISSION_DENIED`
+hoặc `INSUFFICIENT_PERMISSIONS`. Lưu statement ID và trạng thái vào
+[#59](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/59).
+
 ## 5. Tối ưu lưu trữ và đọc/ghi (rubric 3.1, 3.4)
 
 | Kỹ thuật | Áp dụng | Hiệu quả kỳ vọng |
