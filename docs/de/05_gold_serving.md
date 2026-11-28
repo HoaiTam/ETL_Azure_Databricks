@@ -236,10 +236,35 @@ Statement `01f1e96f-2259-11f2-87cb-45946eda025f` xác nhận:
 Lượt đo dùng train từ Bronze, đồng hồ mô phỏng và seed quyền dev rỗng.
 Sau AD-DE-22, P4 dùng danh tính BI thật trên warehouse để đọc `gold.department_sales`
 và xác nhận Power BI nhận được phạm vi phòng ban đúng. Chỉ ghi tổng số người và phòng ban
-từ `gold.bi_user_access` vào issue. P4 có thêm vai `ds`, nên dùng tài khoản chỉ thuộc vai
-`bi` nếu có để thử truy cập Silver bị từ chối. Nếu chưa có tài khoản chỉ có vai `bi`,
-nhờ P1 xác nhận quyền hiệu lực của nhóm `bi` trên Gold và Silver, gồm grant kế thừa từ
-catalog. Ghi kết quả riêng với đối soát dữ liệu ở trên vào [issue #59](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/59).
+từ `gold.bi_user_access` vào issue. P4 có thêm vai `ds`, nên P1 dùng `sp-test-bi`
+để xác minh quyền đọc Gold và Silver của riêng vai `bi` theo mục dưới.
+
+#### Kiểm điều kiện thử quyền BI trên Sub D
+
+Ngày 28/11/2026, warehouse serverless `wh-instacart-bi` đã có trên Sub D.
+`instacart.silver.orders_batch` đã tồn tại, còn schema `instacart.gold` chưa có
+bảng phục vụ BI trên phiên P2 kiểm tra. Quyền hiệu lực trả về cho phiên P2 là
+`ALL_PRIVILEGES` trên cả hai schema. Phiên P2 thiếu quyền `CAN_MANAGE` để đọc ACL
+của warehouse.
+
+[Terraform](../../infra/envs/30-databricks.tfvars) gán vai `bi` cho P4, đồng thời
+P4 có vai `ds`. Stack áp dụng hợp quyền theo từng thành viên. Vai `bi` có
+`USE_SCHEMA` và `SELECT` trên Gold; quyền đọc Silver của P4 đến từ vai `ds`.
+
+Sau khi Gold prod có `department_sales`, P1 chạy hai statement bằng SP `sp-test-bi`
+([PR #277](https://github.com/Vinh5905/ETL_Azure_Databricks/pull/277), cách tạo OAuth secret
+ở [docs/devops/05 bước 5](../devops/05_databricks_platform.md#bước-5--phân-quyền-unity-catalog-đặc-quyền-tối-thiểu)).
+SP chỉ có quyền của vai `bi` và `CAN_USE` trên `wh-instacart-bi`.
+
+```sql
+SELECT 1 FROM instacart.gold.department_sales LIMIT 1;
+SELECT 1 FROM instacart.silver.orders_batch LIMIT 1;
+```
+
+Gold phải chạy thành công. Silver phải trả lỗi phân quyền như `PERMISSION_DENIED`
+hoặc `INSUFFICIENT_PERMISSIONS`. Lưu statement ID và trạng thái vào
+[#59](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/59).
+Thử xong, P1 đặt `enable_bi_test_sp = false`.
 
 ## 5. Tối ưu lưu trữ và đọc/ghi (rubric 3.1, 3.4)
 
