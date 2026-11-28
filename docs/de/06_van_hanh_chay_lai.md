@@ -97,6 +97,19 @@ dòng audit, giữ mã ADF gốc và cập nhật trạng thái từ `failed` th
 Nghiệm thu cuối của issue [#54](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/54)
 vẫn theo dõi AD-DE-15, AD-DE-16 và AD-DE-17. Phần tạo view và đối soát G3/G4 cần đủ nguồn stream.
 
+### Kiểm trước khi chạy ADF trên Sub D (AD-DE-19)
+
+1. Chạy `stream-toggle` với `up`, rồi phục hồi stream prod theo
+   [runbook chuyển Sub D](../devops/chuyen_sang_sub_d.md#6-nạp-lại-dữ-liệu-và-nghiệm-thu-lại).
+2. Xác nhận `stream_orders`, `stream_order_items` và hai view `orders`, `order_items`
+   đã có trong `instacart.silver`. Kiểm tra `pl_master` và `pl_ingest_off` đã publish,
+   ID job mặc định khớp hai job prod và `tr_master_daily` đang `Stopped`.
+   Khi seed, stream và crawler khác đã dừng, chạy tay `pl_master` một lần.
+3. Ghi RunId, trạng thái ba activity và Databricks job run vào
+   [#55](https://github.com/Vinh5905/ETL_Azure_Databricks/issues/55). Đối chiếu
+   `adf_run_id` với ADF và diễn tập CDC lỗi trong bản Debug chưa publish theo
+   [checklist ADF](../../adf/README.md#nghiệm-thu-sau-khi-p1-publish).
+
 ## 3. Event log và `ops.dq_results`
 
 Cấu hình publish event log UC của batch đã có trong bundle AD-DE-08. Stream dùng cùng schema ops
