@@ -83,10 +83,9 @@ variables:
   func_sp_application_id:
     description: >-
       application_id của SP sp-func-recommend (= client id của UAMI id-func-recommend, output 10-core),
-      để endpoint serving cấp CAN_QUERY cho Function. CI tra theo tên rồi đặt qua
-      BUNDLE_VAR_func_sp_application_id; local để trống nếu không deploy serving_ds.yml.
+      để bundle serving cấp CAN_QUERY cho Function. CI tra theo tên rồi đặt qua
+      BUNDLE_VAR_func_sp_application_id.
     default: ""
-
 targets:
   dev:
     mode: development # tiền tố [dev <user>], tạm dừng schedule
